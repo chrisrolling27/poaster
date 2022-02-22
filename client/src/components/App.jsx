@@ -9,7 +9,10 @@ import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
 
-//addDoc(colRef, this.state)
+
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+const colRef = collection(db, 'posts');
 
 export default class App extends React.Component {
 
@@ -20,13 +23,11 @@ export default class App extends React.Component {
 
     this.makeSession = this.makeSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
+
   }
 
   componentDidMount() {
 
-    const app = initializeApp(firebaseConfig);
-    const db = getFirestore(app);
-    const colRef = collection(db, 'posts');
 
     getDocs(colRef)
       .then((snapshot) => {
@@ -49,6 +50,13 @@ export default class App extends React.Component {
   makeSession() {
 
     console.log('boink');
+    console.log(this.state);
+
+    //this works and does in fact add state.
+    // addDoc(colRef, this.state)
+    // .then(() => {
+    //   console.log('added state?')
+    // })
 
   }
 
