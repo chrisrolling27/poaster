@@ -19,6 +19,9 @@
   "dependencies": {
     "express": "^4.17.1",
     "react": "^16.14.0",
-    "react-dom": "^16.14.0"
+    "react-dom": "^16.14.0",
+    "firebase": "^9.6.7",
+    "react-beautiful-dnd": "^13.1.0",
+    "styled-components": "^5.3.3"
   }
 }
