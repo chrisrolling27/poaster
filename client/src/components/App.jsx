@@ -28,7 +28,6 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
-
     getDocs(colRef)
       .then((snapshot) => {
         let posts = [];
@@ -90,6 +89,7 @@ export default class App extends React.Component {
       },
     };
     this.setState(newState);
+
   };
 
   render() {
