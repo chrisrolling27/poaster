@@ -10,21 +10,21 @@ const Container = styled.div`
 
 `;
 
-export default class SessionCard extends React.Component {
+ const SessionCard = (props) => {
 
-  render() {
     return (
-      <Draggable draggableId={this.props.session.id} index={this.props.index}>
+      <Draggable draggableId={props.session.id} index={props.index}>
         {provided => (
           <Container
             {...provided.draggableProps}
             {...provided.dragHandleProps}
             ref={provided.innerRef}
           >
-            {this.props.session.content}
+            {props.session.content}
           </Container>
         )}
       </Draggable>
     );
-  }
 }
+
+export default SessionCard;
