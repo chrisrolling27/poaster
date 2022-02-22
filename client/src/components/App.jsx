@@ -50,20 +50,6 @@ export default class App extends React.Component {
 
     console.log('boink');
 
-
-    // const results = db.get('ideas').on('value', data => {
-
-    //   console.log(data);
-    // })
-    // const db = firebase.firestore(firebaseApp);
-    //const db = getDatabase(firebaseApp);
-    //const heya = db.collection('ideas');
-    //console.log(heya);
-
-    // set(ref(db, 'users/' ), {
-    //   username: thingy
-    // });
-
   }
 
   onDragEnd(result) {
