@@ -1,1 +1,7 @@
-# poaster info here
+
+  ```
+  npm start
+  ```
+
+  npm run react-dev
+  ```
