@@ -10,7 +10,6 @@ import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
 
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const colRef = collection(db, 'posts');
@@ -67,32 +66,65 @@ export default class App extends React.Component {
   }
 
   onDragEnd(result) {
+
     const { destination, source, draggableId } = result;
-    console.log(source.draggableId);
+
     if (!destination) {
       return;
     }
+
     if (
-      destination.droppableId === source.droppableId && destination.index === source.index
+      destination.droppableId === source.droppableId &&
+      destination.index === source.index
     ) {
       return;
     }
-    //todo: change for multi columns
-    const column = this.state.columns[source.droppableId];
-    const newSessionIds = Array.from(column.sessionIds);
-    newSessionIds.splice(source.index, 1);
-    newSessionIds.splice(destination.index, 0, draggableId);
 
-    const newColumn = {
-      ...column,
-      sessionIds: newSessionIds,
+    const start = this.state.columns[source.droppableId];
+    const finish = this.state.columns[destination.droppableId];
+
+    if (start === finish) {
+      const newSessionIds = Array.from(start.sessionIds);
+      newSessionIds.splice(source.index, 1);
+      newSessionIds.splice(destination.index, 0, draggableId);
+
+      const newColumn = {
+        ...start,
+        sessionIds: newSessionIds,
+      };
+
+      const newState = {
+        ...this.state,
+        columns: {
+          ...this.state.columns,
+          [newColumn.id]: newColumn,
+        },
+      };
+
+      this.setState(newState);
+      return;
+    }
+
+    const startSessionIds = Array.from(start.sessionIds);
+    startSessionIds.splice(source.index, 1);
+    const newStart = {
+      ...start,
+      sessionIds: startSessionIds,
+    };
+
+    const finishSessionIds = Array.from(finish.sessionIds);
+    finishSessionIds.splice(destination.index, 0, draggableId);
+    const newFinish = {
+      ...finish,
+      sessionIds: finishSessionIds,
     };
 
     const newState = {
       ...this.state,
       columns: {
         ...this.state.columns,
-        [newColumn.id]: newColumn,
+        [newStart.id]: newStart,
+        [newFinish.id]: newFinish,
       },
     };
     this.setState(newState);

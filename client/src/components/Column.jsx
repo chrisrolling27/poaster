@@ -20,6 +20,7 @@ const Title = styled.h3`
 const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
+  flex-grow: 1;
 `;
 
 

@@ -2301,10 +2301,11 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "onDragEnd",
     value: function onDragEnd(result) {
+      var _objectSpread3;
+
       var destination = result.destination,
           source = result.source,
           draggableId = result.draggableId;
-      console.log(source.draggableId);
 
       if (!destination) {
         return;
@@ -2312,20 +2313,44 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       if (destination.droppableId === source.droppableId && destination.index === source.index) {
         return;
-      } //todo: change for multi columns
+      }
 
+      var start = this.state.columns[source.droppableId];
+      var finish = this.state.columns[destination.droppableId];
 
-      var column = this.state.columns[source.droppableId];
-      var newSessionIds = Array.from(column.sessionIds);
-      newSessionIds.splice(source.index, 1);
-      newSessionIds.splice(destination.index, 0, draggableId);
+      if (start === finish) {
+        var newSessionIds = Array.from(start.sessionIds);
+        newSessionIds.splice(source.index, 1);
+        newSessionIds.splice(destination.index, 0, draggableId);
 
-      var newColumn = _objectSpread(_objectSpread({}, column), {}, {
-        sessionIds: newSessionIds
+        var newColumn = _objectSpread(_objectSpread({}, start), {}, {
+          sessionIds: newSessionIds
+        });
+
+        var _newState = _objectSpread(_objectSpread({}, this.state), {}, {
+          columns: _objectSpread(_objectSpread({}, this.state.columns), {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_0___default()({}, newColumn.id, newColumn))
+        });
+
+        this.setState(_newState);
+        return;
+      }
+
+      var startSessionIds = Array.from(start.sessionIds);
+      startSessionIds.splice(source.index, 1);
+
+      var newStart = _objectSpread(_objectSpread({}, start), {}, {
+        sessionIds: startSessionIds
+      });
+
+      var finishSessionIds = Array.from(finish.sessionIds);
+      finishSessionIds.splice(destination.index, 0, draggableId);
+
+      var newFinish = _objectSpread(_objectSpread({}, finish), {}, {
+        sessionIds: finishSessionIds
       });
 
       var newState = _objectSpread(_objectSpread({}, this.state), {}, {
-        columns: _objectSpread(_objectSpread({}, this.state.columns), {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_0___default()({}, newColumn.id, newColumn))
+        columns: _objectSpread(_objectSpread({}, this.state.columns), {}, (_objectSpread3 = {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_0___default()(_objectSpread3, newStart.id, newStart), _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_0___default()(_objectSpread3, newFinish.id, newFinish), _objectSpread3))
       });
 
       this.setState(newState);
@@ -2411,7 +2436,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n\n  display: flex;\n  flex-direction: column;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_3___default()(Column, _React$Component);
