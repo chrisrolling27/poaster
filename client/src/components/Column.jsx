@@ -9,12 +9,17 @@ const Container = styled.div`
   border: 1px solid lightgrey;
   border-radius: 2px;
   margin-bottom: 8px;
+  width: 220px;
+
+  display: flex;
+  flex-direction: column;
 `;
 const Title = styled.h3`
   paddings: 8px;
 `;
 const SessionList = styled.div`
   paddings: 8px;
+  min-height: 100px;
 `;
 
 

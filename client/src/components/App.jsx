@@ -1,6 +1,7 @@
 import React from 'react'
 import SessionAdder from './SessionAdder.jsx';
 import SessionCard from './SessionCard.jsx';
+import styled from 'styled-components';
 import { DragDropContext } from 'react-beautiful-dnd';
 import axios from 'axios';
 import Column from './Column.jsx';
@@ -13,6 +14,12 @@ import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const colRef = collection(db, 'posts');
+
+const Container = styled.div`
+display: flex;
+`;
+
+
 
 export default class App extends React.Component {
 
@@ -97,12 +104,14 @@ export default class App extends React.Component {
       <div>
         <DragDropContext onDragEnd={this.onDragEnd}>
 
-          {this.state.columnOrder.map(columnId => {
-            const column = this.state.columns[columnId];
-            const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
+          <Container>
+            {this.state.columnOrder.map(columnId => {
+              const column = this.state.columns[columnId];
+              const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
 
-            return <Column key={column.id} column={column} sessions={sessions} />;
-          })}
+              return <Column key={column.id} column={column} sessions={sessions} />;
+            })}
+          </Container>
         </DragDropContext>
 
         {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}

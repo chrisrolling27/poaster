@@ -15,8 +15,18 @@ const initialData = {
       title: 'Ideas',
       sessionIds: ['session-1', 'session-2', 'session-3', 'session-4'],
     },
+    'column-2': {
+      id: 'column-2',
+      title: 'Notes',
+      sessionIds: [],
+    },
+    'column-3': {
+      id: 'column-3',
+      title: 'Suggestions',
+      sessionIds: [],
+    },
   },
-    columnOrder: ['column-1'],
+    columnOrder: ['column-1', 'column-2', 'column-3'],
 
     addSession: false,
 

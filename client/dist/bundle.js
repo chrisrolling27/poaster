@@ -2202,18 +2202,21 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _babel_runtime_helpers_possibleConstructorReturn__WEBPACK_IMPORTED_MODULE_5___default = /*#__PURE__*/__webpack_require__.n(_babel_runtime_helpers_possibleConstructorReturn__WEBPACK_IMPORTED_MODULE_5__);
 /* harmony import */ var _babel_runtime_helpers_getPrototypeOf__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! @babel/runtime/helpers/getPrototypeOf */ "./node_modules/@babel/runtime/helpers/getPrototypeOf.js");
 /* harmony import */ var _babel_runtime_helpers_getPrototypeOf__WEBPACK_IMPORTED_MODULE_6___default = /*#__PURE__*/__webpack_require__.n(_babel_runtime_helpers_getPrototypeOf__WEBPACK_IMPORTED_MODULE_6__);
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! react */ "./node_modules/react/index.js");
-/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_7__);
-/* harmony import */ var _SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! ./SessionAdder.jsx */ "./client/src/components/SessionAdder.jsx");
-/* harmony import */ var _SessionCard_jsx__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./SessionCard.jsx */ "./client/src/components/SessionCard.jsx");
-/* harmony import */ var react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! react-beautiful-dnd */ "./node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.esm.js");
-/* harmony import */ var axios__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! axios */ "../node_modules/axios/index.js");
-/* harmony import */ var axios__WEBPACK_IMPORTED_MODULE_11___default = /*#__PURE__*/__webpack_require__.n(axios__WEBPACK_IMPORTED_MODULE_11__);
-/* harmony import */ var _Column_jsx__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! ./Column.jsx */ "./client/src/components/Column.jsx");
-/* harmony import */ var _initialData__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ./initialData */ "./client/src/components/initialData.js");
-/* harmony import */ var _firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ../firebase/firebase_config.js */ "./client/src/firebase/firebase_config.js");
-/* harmony import */ var firebase_app__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! firebase/app */ "./node_modules/firebase/app/dist/index.esm.js");
-/* harmony import */ var firebase_firestore__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! firebase/firestore */ "./node_modules/firebase/firestore/dist/index.esm.js");
+/* harmony import */ var _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! @babel/runtime/helpers/taggedTemplateLiteral */ "./node_modules/@babel/runtime/helpers/taggedTemplateLiteral.js");
+/* harmony import */ var _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(_babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7__);
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! react */ "./node_modules/react/index.js");
+/* harmony import */ var react__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_8__);
+/* harmony import */ var _SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./SessionAdder.jsx */ "./client/src/components/SessionAdder.jsx");
+/* harmony import */ var _SessionCard_jsx__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./SessionCard.jsx */ "./client/src/components/SessionCard.jsx");
+/* harmony import */ var styled_components__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! styled-components */ "./node_modules/styled-components/dist/styled-components.browser.esm.js");
+/* harmony import */ var react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! react-beautiful-dnd */ "./node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.esm.js");
+/* harmony import */ var axios__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! axios */ "../node_modules/axios/index.js");
+/* harmony import */ var axios__WEBPACK_IMPORTED_MODULE_13___default = /*#__PURE__*/__webpack_require__.n(axios__WEBPACK_IMPORTED_MODULE_13__);
+/* harmony import */ var _Column_jsx__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! ./Column.jsx */ "./client/src/components/Column.jsx");
+/* harmony import */ var _initialData__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! ./initialData */ "./client/src/components/initialData.js");
+/* harmony import */ var _firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_16__ = __webpack_require__(/*! ../firebase/firebase_config.js */ "./client/src/firebase/firebase_config.js");
+/* harmony import */ var firebase_app__WEBPACK_IMPORTED_MODULE_17__ = __webpack_require__(/*! firebase/app */ "./node_modules/firebase/app/dist/index.esm.js");
+/* harmony import */ var firebase_firestore__WEBPACK_IMPORTED_MODULE_18__ = __webpack_require__(/*! firebase/firestore */ "./node_modules/firebase/firestore/dist/index.esm.js");
 
 
 
@@ -2221,6 +2224,9 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
+
+
+var _templateObject;
 
 function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); if (enumerableOnly) { symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; }); } keys.push.apply(keys, symbols); } return keys; }
 
@@ -2240,9 +2246,11 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 
-var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_15__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_14__["firebaseConfig"]);
-var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_16__["getFirestore"])(app);
-var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_16__["collection"])(db, 'posts');
+
+var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_17__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_16__["firebaseConfig"]);
+var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_18__["getFirestore"])(app);
+var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_18__["collection"])(db, 'posts');
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_11__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\ndisplay: flex;\n"])));
 
 var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_4___default()(App, _React$Component);
@@ -2255,7 +2263,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     _babel_runtime_helpers_classCallCheck__WEBPACK_IMPORTED_MODULE_1___default()(this, App);
 
     _this = _super.call(this, props);
-    _this.state = _initialData__WEBPACK_IMPORTED_MODULE_13__["default"];
+    _this.state = _initialData__WEBPACK_IMPORTED_MODULE_15__["default"];
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     return _this;
@@ -2264,7 +2272,7 @@ var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_createClass__WEBPACK_IMPORTED_MODULE_2___default()(App, [{
     key: "componentDidMount",
     value: function componentDidMount() {
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_16__["getDocs"])(colRef).then(function (snapshot) {
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_18__["getDocs"])(colRef).then(function (snapshot) {
         var posts = [];
         snapshot.docs.forEach(function (doc) {
           posts.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
@@ -2327,19 +2335,19 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function render() {
       var _this2 = this;
 
-      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["DragDropContext"], {
+      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__["DragDropContext"], {
         onDragEnd: this.onDragEnd
-      }, this.state.columnOrder.map(function (columnId) {
+      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Container, null, this.state.columnOrder.map(function (columnId) {
         var column = _this2.state.columns[columnId];
         var sessions = column.sessionIds.map(function (sessionId) {
           return _this2.state.sessions[sessionId];
         });
-        return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_12__["default"], {
+        return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_14__["default"], {
           key: column.id,
           column: column,
           sessions: sessions
         });
-      })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_8__["default"], null, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("button", {
+      }))), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_9__["default"], null, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
         className: "addSessionButton",
         onClick: this.makeSession
       }, " + "));
@@ -2347,7 +2355,7 @@ var App = /*#__PURE__*/function (_React$Component) {
   }]);
 
   return App;
-}(react__WEBPACK_IMPORTED_MODULE_7___default.a.Component);
+}(react__WEBPACK_IMPORTED_MODULE_8___default.a.Component);
 
 
 ;
@@ -2401,9 +2409,9 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n"])));
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n\n  display: flex;\n  flex-direction: column;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_3___default()(Column, _React$Component);
@@ -2623,9 +2631,19 @@ var initialData = {
       id: 'column-1',
       title: 'Ideas',
       sessionIds: ['session-1', 'session-2', 'session-3', 'session-4']
+    },
+    'column-2': {
+      id: 'column-2',
+      title: 'Notes',
+      sessionIds: []
+    },
+    'column-3': {
+      id: 'column-3',
+      title: 'Suggestions',
+      sessionIds: []
     }
   },
-  columnOrder: ['column-1'],
+  columnOrder: ['column-1', 'column-2', 'column-3'],
   addSession: false
 };
 /* harmony default export */ __webpack_exports__["default"] = (initialData);
