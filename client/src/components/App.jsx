@@ -3,7 +3,7 @@ import styled from 'styled-components';
 import SessionAdder from './SessionAdder.jsx';
 import SessionCard from './SessionCard.jsx';
 import Column from './Column.jsx';
-import { DragDropContext } from 'react-beautiful-dnd';
+import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
@@ -125,25 +125,29 @@ export default class App extends React.Component {
 
   render() {
     return (
-      <div>
-        <DragDropContext onDragEnd={this.onDragEnd}>
 
-          <Container>
-            {this.state.columnOrder.map(columnId => {
-              const column = this.state.columns[columnId];
-              const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
+      <DragDropContext onDragEnd={this.onDragEnd}>
+        <Droppable droppableId="all-columns" direction="horizontal" type="column">
+          {provided => (
+            <Container
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+            >
+              {this.state.columnOrder.map((columnId, index) => {
+                const column = this.state.columns[columnId];
+                const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
 
-              return <Column key={column.id} column={column} sessions={sessions} />;
-            })}
-          </Container>
-        </DragDropContext>
+                return <Column key={column.id} column={column} sessions={sessions} index={index} />;
+              })}
+              {provided.placeholder}
+            </Container>
+          )}
+        </Droppable>
+      </DragDropContext>
 
-        {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
-        <button className="addSessionButton" onClick={this.makeSession}> + </button>
-      </div>
-    )
-  };
-};
+    );
+  }
+}
 
 //DB SETUP
 
@@ -157,10 +161,10 @@ const colRef = collection(db, 'posts');
 const initialData = {
 
   sessions: {
-    'session-1': {id: 'session-1', content: 'Hello switcher' },
-    'session-2': {id: 'session-2', content: 'Swiper no swiping' },
-    'session-3': {id: 'session-3', content: 'Jezebel was innocent' },
-    'session-4': {id: 'session-4', content: 'One more time with feeling' },
+    'session-1': { id: 'session-1', content: 'Hello switcher' },
+    'session-2': { id: 'session-2', content: 'Swiper no swiping' },
+    'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
+    'session-4': { id: 'session-4', content: 'One more time with feeling' },
   },
 
   columns: {
@@ -180,8 +184,15 @@ const initialData = {
       sessionIds: [],
     },
   },
-    columnOrder: ['column-1', 'column-2', 'column-3'],
+  columnOrder: ['column-1', 'column-2'],
 
-    addSession: false,
+  addSession: false,
 
 };
+
+//old addsession
+
+// <div>
+//   {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
+//   <button className="addSessionButton" onClick={this.makeSession}> + </button>
+// </div>

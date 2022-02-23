@@ -1,7 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import SessionCard from './SessionCard.jsx';
-import { Droppable } from 'react-beautiful-dnd';
+import { Droppable, Draggable } from 'react-beautiful-dnd';
 
 
 const Container = styled.div`
@@ -28,20 +28,28 @@ export default class Column extends React.Component {
 
   render() {
     return (
-      <Container>
-        <Title>  {this.props.column.title} </Title>
-        <Droppable droppableId={this.props.column.id}>
-          {provided => (
-            <SessionList ref={provided.innerRef} {...provided.droppableProps} >
-
-              {this.props.sessions.map((session, index) => (
-              <SessionCard key={session.id} session={session} index={index} />
-          ))}
-              {provided.placeholder}
-            </SessionList>
-          )}
-        </Droppable>
-      </Container>
+      <Draggable draggableId={this.props.column.id} index={this.props.index}>
+        {(provided) => (
+          <Container innerRef={this.props.index}>
+            <Title {...provided.dragHandleProps} >
+              {this.props.column.title}
+            </Title>
+            <Droppable droppableId={this.props.column.id} type="session">
+              {provided => (
+                <SessionList
+                  ref={provided.innerRef}
+                  {...provided.droppableProps}
+                >
+                  {this.props.sessions.map((session, index) => (
+                    <SessionCard key={session.id} session={session} index={index} />
+                  ))}
+                  {provided.placeholder}
+                </SessionList>
+              )}
+            </Droppable>
+          </Container>
+        )}
+      </Draggable>
     );
   }
 }
