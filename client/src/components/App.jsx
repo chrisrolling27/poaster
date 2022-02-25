@@ -11,6 +11,7 @@ import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
 
 const Container = styled.div`
 display: flex;
+
 `;
 
 
@@ -59,7 +60,7 @@ export default class App extends React.Component {
 
   onDragEnd(result) {
 
-    const { destination, source, draggableId } = result;
+    const { destination, source, draggableId, type } = result;
 
     if (!destination) {
       return;
@@ -71,6 +72,21 @@ export default class App extends React.Component {
     ) {
       return;
     }
+
+    if (type === 'column') {
+      const newColumnOrder = Array.from(this.state.columnOrder);
+      newColumnOrder.splice(source.index, 1);
+      newColumnOrder.splice(destination.index, 0, draggableId);
+
+      const newState = {
+        ...this.state,
+        columnOrder: newColumnOrder,
+      };
+      this.setState(newState);
+      return;
+    }
+
+
 
     const start = this.state.columns[source.droppableId];
     const finish = this.state.columns[destination.droppableId];

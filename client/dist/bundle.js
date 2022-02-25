@@ -2245,7 +2245,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n\n"])));
 
 var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_5___default()(App, _React$Component);
@@ -2301,13 +2301,27 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var destination = result.destination,
           source = result.source,
-          draggableId = result.draggableId;
+          draggableId = result.draggableId,
+          type = result.type;
 
       if (!destination) {
         return;
       }
 
       if (destination.droppableId === source.droppableId && destination.index === source.index) {
+        return;
+      }
+
+      if (type === 'column') {
+        var newColumnOrder = Array.from(this.state.columnOrder);
+        newColumnOrder.splice(source.index, 1);
+        newColumnOrder.splice(destination.index, 0, draggableId);
+
+        var _newState = _objectSpread(_objectSpread({}, this.state), {}, {
+          columnOrder: newColumnOrder
+        });
+
+        this.setState(_newState);
         return;
       }
 
@@ -2323,11 +2337,11 @@ var App = /*#__PURE__*/function (_React$Component) {
           sessionIds: newSessionIds
         });
 
-        var _newState = _objectSpread(_objectSpread({}, this.state), {}, {
+        var _newState2 = _objectSpread(_objectSpread({}, this.state), {}, {
           columns: _objectSpread(_objectSpread({}, this.state.columns), {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()({}, newColumn.id, newColumn))
         });
 
-        this.setState(_newState);
+        this.setState(_newState2);
         return;
       }
 
@@ -2483,9 +2497,9 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n"])));
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: white;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n\n  flex-grow: 1;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_3___default()(Column, _React$Component);
@@ -2507,9 +2521,9 @@ var Column = /*#__PURE__*/function (_React$Component) {
         draggableId: this.props.column.id,
         index: this.props.index
       }, function (provided) {
-        return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Container, {
+        return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, {
           ref: provided.innerRef
-        }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["Droppable"], {
+        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["Droppable"], {
           droppableId: _this.props.column.id,
           type: "session"
         }, function (provided) {

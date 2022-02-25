@@ -12,6 +12,7 @@ const Container = styled.div`
   width: 220px;
   display: flex;
   flex-direction: column;
+  background-color: white;
 `;
 const Title = styled.h3`
   paddings: 8px;
@@ -19,6 +20,7 @@ const Title = styled.h3`
 const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
+
   flex-grow: 1;
 `;
 
@@ -29,8 +31,9 @@ export default class Column extends React.Component {
     return (
       <Draggable draggableId={this.props.column.id} index={this.props.index}>
         {(provided) => (
-          <Container ref={provided.innerRef}>
-            <Title {...provided.dragHandleProps} >
+          <Container {...provided.draggableProps}
+            ref={provided.innerRef}>
+            <Title {...provided.dragHandleProps}>
               {this.props.column.title}
             </Title>
             <Droppable droppableId={this.props.column.id} type="session">
