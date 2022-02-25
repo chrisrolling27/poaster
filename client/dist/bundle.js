@@ -2508,7 +2508,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
         index: this.props.index
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Container, {
-          innerRef: _this.props.index
+          ref: provided.innerRef
         }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["Droppable"], {
           droppableId: _this.props.column.id,
           type: "session"

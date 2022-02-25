@@ -127,7 +127,11 @@ export default class App extends React.Component {
     return (
 
       <DragDropContext onDragEnd={this.onDragEnd}>
-        <Droppable droppableId="all-columns" direction="horizontal" type="column">
+        <Droppable
+          droppableId="all-columns"
+          direction="horizontal"
+          type="column"
+        >
           {provided => (
             <Container
               {...provided.droppableProps}

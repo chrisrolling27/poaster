@@ -29,7 +29,7 @@ export default class Column extends React.Component {
     return (
       <Draggable draggableId={this.props.column.id} index={this.props.index}>
         {(provided) => (
-          <Container innerRef={this.props.index}>
+          <Container ref={provided.innerRef}>
             <Title {...provided.dragHandleProps} >
               {this.props.column.title}
             </Title>
