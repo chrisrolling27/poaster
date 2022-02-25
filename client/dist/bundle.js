@@ -384,7 +384,8 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_7__);
 /* harmony import */ var styled_components__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(/*! styled-components */ "./node_modules/styled-components/dist/styled-components.browser.esm.js");
 /* harmony import */ var _SessionCard_jsx__WEBPACK_IMPORTED_MODULE_9__ = __webpack_require__(/*! ./SessionCard.jsx */ "./client/src/components/SessionCard.jsx");
-/* harmony import */ var react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! react-beautiful-dnd */ "./node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.esm.js");
+/* harmony import */ var _SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! ./SessionAdder.jsx */ "./client/src/components/SessionAdder.jsx");
+/* harmony import */ var react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! react-beautiful-dnd */ "./node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.esm.js");
 
 
 
@@ -403,9 +404,10 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 
+
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: white;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n\n  flex-grow: 1;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_3___default()(Column, _React$Component);
@@ -423,13 +425,13 @@ var Column = /*#__PURE__*/function (_React$Component) {
     value: function render() {
       var _this = this;
 
-      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["Draggable"], {
+      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Draggable"], {
         draggableId: this.props.column.id,
         index: this.props.index
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, {
           ref: provided.innerRef
-        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_10__["Droppable"], {
+        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("button", null, " + "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
           droppableId: _this.props.column.id,
           type: "session"
         }, function (provided) {

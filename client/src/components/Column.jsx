@@ -1,6 +1,7 @@
 import React from 'react';
 import styled from 'styled-components';
 import SessionCard from './SessionCard.jsx';
+import SessionAdder from './SessionAdder.jsx';
 import { Droppable, Draggable } from 'react-beautiful-dnd';
 
 
@@ -20,7 +21,6 @@ const Title = styled.h3`
 const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
-
   flex-grow: 1;
 `;
 
@@ -36,6 +36,7 @@ export default class Column extends React.Component {
             <Title {...provided.dragHandleProps}>
               {this.props.column.title}
             </Title>
+            <button> + </button>
             <Droppable droppableId={this.props.column.id} type="session">
               {provided => (
                 <SessionList
