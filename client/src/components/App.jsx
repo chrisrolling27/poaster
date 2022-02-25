@@ -80,6 +80,11 @@ export default class App extends React.Component {
     //console.log('boink');
     console.log(e);
     console.log(id);
+
+    this.setState({addSession: true});
+
+
+
     //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)
@@ -171,7 +176,7 @@ export default class App extends React.Component {
 
   render() {
     return (
-
+      <div>
       <DragDropContext onDragEnd={this.onDragEnd}>
         <Droppable
           droppableId="all-columns"
@@ -195,20 +200,13 @@ export default class App extends React.Component {
         </Droppable>
       </DragDropContext>
 
+      {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
+      </div>
     );
   }
 }
 
 //DB SETUP
-
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const colRef = collection(db, 'posts');
-
-
-//old addsession
-
-// <div>
-//   {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
-//   <button className="addSessionButton" onClick={this.makeSession}> + </button>
-// </div>

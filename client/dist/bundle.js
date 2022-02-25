@@ -234,7 +234,10 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function makeSession(e, id) {
       //console.log('boink');
       console.log(e);
-      console.log(id); //console.log(this.state);
+      console.log(id);
+      this.setState({
+        addSession: true
+      }); //console.log(this.state);
       //this works and does in fact add state.
       // addDoc(colRef, this.state)
       // .then(() => {
@@ -318,7 +321,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function render() {
       var _this2 = this;
 
-      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_14__["DragDropContext"], {
+      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_14__["DragDropContext"], {
         onDragEnd: this.onDragEnd
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_14__["Droppable"], {
         droppableId: "all-columns",
@@ -340,7 +343,7 @@ var App = /*#__PURE__*/function (_React$Component) {
             makeSession: _this2.makeSession
           });
         }), provided.placeholder);
-      }));
+      })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], null, " ") : '');
     }
   }]);
 
@@ -351,11 +354,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_16__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_15__["firebaseConfig"]);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_17__["getFirestore"])(app);
-var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_17__["collection"])(db, 'posts'); //old addsession
-// <div>
-//   {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
-//   <button className="addSessionButton" onClick={this.makeSession}> + </button>
-// </div>
+var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_17__["collection"])(db, 'posts');
 
 /***/ }),
 
