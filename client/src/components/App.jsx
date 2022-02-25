@@ -75,10 +75,12 @@ export default class App extends React.Component {
   }
 
 
-  makeSession() {
+  makeSession(e, id) {
 
-    console.log('boink');
-    console.log(this.state);
+    //console.log('boink');
+    console.log(e);
+    console.log(id);
+    //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)
     // .then(() => {
@@ -114,7 +116,6 @@ export default class App extends React.Component {
       this.setState(newState);
       return;
     }
-
 
 
     const start = this.state.columns[source.droppableId];
@@ -186,7 +187,7 @@ export default class App extends React.Component {
                 const column = this.state.columns[columnId];
                 const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
 
-                return <Column key={column.id} column={column} sessions={sessions} index={index} />;
+                return <Column key={column.id} column={column} sessions={sessions} index={index} makeSession={this.makeSession}/>;
               })}
               {provided.placeholder}
             </Container>

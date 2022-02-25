@@ -4,7 +4,6 @@ import SessionCard from './SessionCard.jsx';
 import SessionAdder from './SessionAdder.jsx';
 import { Droppable, Draggable } from 'react-beautiful-dnd';
 
-
 const Container = styled.div`
   margin: 8px;
   border: 1px solid lightgrey;
@@ -17,6 +16,7 @@ const Container = styled.div`
 `;
 const Title = styled.h3`
   paddings: 8px;
+  border: 1px solid lightgrey;
 `;
 const SessionList = styled.div`
   paddings: 8px;
@@ -27,6 +27,7 @@ const SessionList = styled.div`
 
 export default class Column extends React.Component {
 
+
   render() {
     return (
       <Draggable draggableId={this.props.column.id} index={this.props.index}>
@@ -36,7 +37,7 @@ export default class Column extends React.Component {
             <Title {...provided.dragHandleProps}>
               {this.props.column.title}
             </Title>
-            <button> + </button>
+            <button onClick={(e) => this.props.makeSession(e, this.props.column.id)}> + </button>
             <Droppable droppableId={this.props.column.id} type="session">
               {provided => (
                 <SessionList

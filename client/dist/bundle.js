@@ -231,9 +231,11 @@ var App = /*#__PURE__*/function (_React$Component) {
     }
   }, {
     key: "makeSession",
-    value: function makeSession() {
-      console.log('boink');
-      console.log(this.state); //this works and does in fact add state.
+    value: function makeSession(e, id) {
+      //console.log('boink');
+      console.log(e);
+      console.log(id); //console.log(this.state);
+      //this works and does in fact add state.
       // addDoc(colRef, this.state)
       // .then(() => {
       //   console.log('added state?')
@@ -334,7 +336,8 @@ var App = /*#__PURE__*/function (_React$Component) {
             key: column.id,
             column: column,
             sessions: sessions,
-            index: index
+            index: index,
+            makeSession: _this2.makeSession
           });
         }), provided.placeholder);
       }));
@@ -406,7 +409,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: white;\n"])));
-var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n"])));
+var Title = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  border: 1px solid lightgrey;\n"])));
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_8__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_6___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
@@ -431,7 +434,11 @@ var Column = /*#__PURE__*/function (_React$Component) {
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, {
           ref: provided.innerRef
-        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("button", null, " + "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
+        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(Title, provided.dragHandleProps, _this.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("button", {
+          onClick: function onClick(e) {
+            return _this.props.makeSession(e, _this.props.column.id);
+          }
+        }, " + "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
           droppableId: _this.props.column.id,
           type: "session"
         }, function (provided) {
