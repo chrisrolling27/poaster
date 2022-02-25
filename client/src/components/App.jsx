@@ -54,7 +54,7 @@ export default class App extends React.Component {
     // .then(() => {
     //   console.log('added state?')
     // })
-
+    //
   }
 
   onDragEnd(result) {
