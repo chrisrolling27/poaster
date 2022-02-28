@@ -206,6 +206,7 @@ var App = /*#__PURE__*/function (_React$Component) {
       columnOrder: ['column-1', 'column-2', 'column-3']
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
+    _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     return _this;
   }
@@ -247,9 +248,10 @@ var App = /*#__PURE__*/function (_React$Component) {
     }
   }, {
     key: "submitSession",
-    value: function submitSession(e) {
-      e.preventDefault();
-      console.log(this.state.sessionText);
+    value: function submitSession(e, text) {
+      e.preventDefault(); //console.log(e);
+
+      console.log(text); //this.setState({addSession: false});
     }
   }, {
     key: "onDragEnd",
@@ -521,7 +523,6 @@ var SessionAdder = /*#__PURE__*/function (_React$Component) {
       sessionText: ''
     };
     _this.handleChange = _this.handleChange.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_2___default()(_this));
-    _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_2___default()(_this));
     return _this;
   }
 
@@ -533,18 +534,16 @@ var SessionAdder = /*#__PURE__*/function (_React$Component) {
       });
     }
   }, {
-    key: "submitSession",
-    value: function submitSession(e) {
-      e.preventDefault();
-      console.log(this.state.sessionText);
-    }
-  }, {
     key: "render",
     value: function render() {
+      var _this2 = this;
+
       return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("div", {
         className: "sessionAdder"
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("form", {
-        onSubmit: this.submitSession
+        onSubmit: function onSubmit(e) {
+          return _this2.props.submitSession(e, _this2.state.sessionText);
+        }
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_6___default.a.createElement("textarea", {
         rows: "5",
         cols: "50",

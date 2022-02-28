@@ -11,24 +11,19 @@ class SessionAdder extends React.Component {
     };
 
     this.handleChange = this.handleChange.bind(this);
-    this.submitSession = this.submitSession.bind(this);
+
   }
 
   handleChange(e) {
     this.setState({ sessionText: e.target.value })
   }
 
-  submitSession(e) {
-    e.preventDefault();
-    console.log(this.state.sessionText);
-
-  }
-
   render() {
     return (
       <div className="sessionAdder">
 
-        <form onSubmit={this.submitSession}>
+        <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
+
 
           <textarea rows="5" cols="50" name="sessiontext" defaultValue="Notes here" onChange={this.handleChange}>
 

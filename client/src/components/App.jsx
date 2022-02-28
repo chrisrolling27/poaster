@@ -52,7 +52,9 @@ export default class App extends React.Component {
     };
 
     this.makeSession = this.makeSession.bind(this);
+    this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
+
 
   }
 
@@ -83,8 +85,6 @@ export default class App extends React.Component {
 
     this.setState({addSession: true});
 
-
-
     //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)
@@ -94,10 +94,13 @@ export default class App extends React.Component {
     //
   }
 
-  submitSession(e) {
+  submitSession(e, text) {
     e.preventDefault();
-    console.log(this.state.sessionText);
+    //console.log(e);
+    console.log(text);
 
+
+   //this.setState({addSession: false});
   }
 
   onDragEnd(result) {
