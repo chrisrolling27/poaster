@@ -19,16 +19,9 @@ class SessionAdder extends React.Component {
   }
 
   submitSession(e) {
+    e.preventDefault();
     console.log(this.state.sessionText);
-    axios.post('/session', {
-      text: this.state.sessionText
-    })
-      .then((response) => {
-        console.log(response);
-      })
-      .catch((response) => {
-        console.log(error);
-      });
+
   }
 
   render() {

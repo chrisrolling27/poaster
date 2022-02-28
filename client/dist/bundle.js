@@ -246,6 +246,12 @@ var App = /*#__PURE__*/function (_React$Component) {
       //
     }
   }, {
+    key: "submitSession",
+    value: function submitSession(e) {
+      e.preventDefault();
+      console.log(this.state.sessionText);
+    }
+  }, {
     key: "onDragEnd",
     value: function onDragEnd(result) {
       var _objectSpread3;
@@ -343,7 +349,9 @@ var App = /*#__PURE__*/function (_React$Component) {
             makeSession: _this2.makeSession
           });
         }), provided.placeholder);
-      })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], null, " ") : '');
+      })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
+        submitSession: this.submitSession
+      }, " ") : '');
     }
   }]);
 
@@ -527,14 +535,8 @@ var SessionAdder = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(e) {
+      e.preventDefault();
       console.log(this.state.sessionText);
-      axios.post('/session', {
-        text: this.state.sessionText
-      }).then(function (response) {
-        console.log(response);
-      })["catch"](function (response) {
-        console.log(error);
-      });
     }
   }, {
     key: "render",

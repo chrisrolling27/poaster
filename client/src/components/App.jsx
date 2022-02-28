@@ -94,6 +94,12 @@ export default class App extends React.Component {
     //
   }
 
+  submitSession(e) {
+    e.preventDefault();
+    console.log(this.state.sessionText);
+
+  }
+
   onDragEnd(result) {
 
     const { destination, source, draggableId, type } = result;
@@ -200,7 +206,7 @@ export default class App extends React.Component {
         </Droppable>
       </DragDropContext>
 
-      {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
+      {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
       </div>
     );
   }
