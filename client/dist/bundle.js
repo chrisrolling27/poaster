@@ -235,7 +235,6 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "makeSession",
     value: function makeSession(e, id) {
-      //console.log(id);
       this.setState({
         addSession: true,
         addedFrom: id
@@ -254,10 +253,14 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var updatedSessions = _objectSpread({}, this.state.sessions);
 
-      updatedSessions[newId] = newInfo;
-      this.setState({
-        sessions: updatedSessions
-      }); //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
+      updatedSessions[newId] = newInfo; //need this eventually
+      //this.setState({sessions: updatedSessions});
+      //let updatedOrder = this.state.columns[this.state.addedFrom].sessionIds;
+
+      var updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+      updatedOrder.push(newId);
+      console.log(updatedOrder); //need to put session in array and in the order
+      //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
       //newArray.push(newSession);
       // console.log(this.state.columns[this.state.addedFrom].sessionIds);
       //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);

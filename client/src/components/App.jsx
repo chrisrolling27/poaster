@@ -80,11 +80,9 @@ export default class App extends React.Component {
 
 
   makeSession(e, id) {
-
-    //console.log(id);
     this.setState({addSession: true, addedFrom: id});
-
   }
+
 
   submitSession(e, text) {
     e.preventDefault();
@@ -102,9 +100,17 @@ export default class App extends React.Component {
     }
 
     updatedSessions[newId] = newInfo;
+    //need this eventually
+    //this.setState({sessions: updatedSessions});
 
-    this.setState({sessions: updatedSessions});
+    //let updatedOrder = this.state.columns[this.state.addedFrom].sessionIds;
 
+    const updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+
+    updatedOrder.push(newId);
+    console.log(updatedOrder);
+
+    //need to put session in array and in the order
 
     //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
     //newArray.push(newSession);
