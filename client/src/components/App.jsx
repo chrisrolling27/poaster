@@ -111,6 +111,29 @@ export default class App extends React.Component {
 
     console.log(newSession);
 
+    //fix this:
+   // console.log(this.state.columns[this.state.addedFrom].sessionIds);
+    //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
+
+
+//this.state.addedFrom
+   // columns: {
+    //   'column-1': {
+    //     id: 'column-1',
+    //     title: 'Ideas',
+    //     sessionIds: ['session-1', 'session-2', 'session-3'],
+    //   },
+    //   'column-2': {
+    //     id: 'column-2',
+    //     title: 'Notes',
+    //     sessionIds: [],
+    //   },
+    //   'column-3': {
+    //     id: 'column-3',
+    //     title: 'Suggestions',
+    //     sessionIds: ['session-4'],
+    //   },
+    // },
 
     // sessions: {
     //   'session-1': { id: 'session-1', content: 'Hello switcher' },
@@ -119,25 +142,10 @@ export default class App extends React.Component {
     //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
     // },
 
-    // columns: {
-    //   'column-1': {
-    //     id: 'column-1',
-    //     title: 'Ideas',
-    //     sessionIds: ['session-1', 'session-2', 'session-3'],
-    //   },
-
     // const newState = {
     //   ...this.state,
     //   columnOrder: newColumnOrder,
     // };
-
-
-
-
-
-
-
-
 
 
     //console.log(this.state.sessions.fromy.content)

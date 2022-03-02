@@ -258,18 +258,33 @@ var App = /*#__PURE__*/function (_React$Component) {
         content: text
       };
       newSession[newId] = newInfo;
-      console.log(newSession); // sessions: {
-      //   'session-1': { id: 'session-1', content: 'Hello switcher' },
-      //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
-      //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
-      //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
-      // },
+      console.log(newSession); //fix this:
+      // console.log(this.state.columns[this.state.addedFrom].sessionIds);
+      //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
+      //this.state.addedFrom
       // columns: {
       //   'column-1': {
       //     id: 'column-1',
       //     title: 'Ideas',
       //     sessionIds: ['session-1', 'session-2', 'session-3'],
       //   },
+      //   'column-2': {
+      //     id: 'column-2',
+      //     title: 'Notes',
+      //     sessionIds: [],
+      //   },
+      //   'column-3': {
+      //     id: 'column-3',
+      //     title: 'Suggestions',
+      //     sessionIds: ['session-4'],
+      //   },
+      // },
+      // sessions: {
+      //   'session-1': { id: 'session-1', content: 'Hello switcher' },
+      //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
+      //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
+      //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
+      // },
       // const newState = {
       //   ...this.state,
       //   columnOrder: newColumnOrder,
