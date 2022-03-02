@@ -253,10 +253,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var updatedSessions = _objectSpread({}, this.state.sessions);
 
-      updatedSessions[newId] = newInfo; //need this eventually
-      //this.setState({sessions: updatedSessions});
-      //let updatedOrder = this.state.columns[this.state.addedFrom].sessionIds;
-
+      updatedSessions[newId] = newInfo;
       var updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
       updatedOrder.push(newId);
       console.log(updatedOrder); //need to put session in array and in the order
@@ -264,47 +261,20 @@ var App = /*#__PURE__*/function (_React$Component) {
       //newArray.push(newSession);
       // console.log(this.state.columns[this.state.addedFrom].sessionIds);
       //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
-      //this.state.addedFrom
-      // columns: {
-      //   'column-1': {
-      //     id: 'column-1',
-      //     title: 'Ideas',
-      //     sessionIds: ['session-1', 'session-2', 'session-3'],
-      //   },
-      //   'column-2': {
-      //     id: 'column-2',
-      //     title: 'Notes',
-      //     sessionIds: [],
-      //   },
-      //   'column-3': {
-      //     id: 'column-3',
-      //     title: 'Suggestions',
-      //     sessionIds: ['session-4'],
-      //   },
-      // },
-      // sessions: {
-      //   'session-1': { id: 'session-1', content: 'Hello switcher' },
-      //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
-      //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
-      //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
-      // },
-      // const newState = {
-      //   ...this.state,
-      //   columnOrder: newColumnOrder,
-      // };
-      //console.log(this.state.sessions.fromy.content)
-      //console.log(this.state);
-      //this works and does in fact add state.
-      // addDoc(colRef, this.state)
-      // .then(() => {
-      //   console.log('added state?')
-      // })
-      //
+      //this.setState({sessions: updatedSessions});
 
       this.setState({
         addSession: false
       });
-    }
+    } //console.log(this.state.sessions.fromy.content)
+    //console.log(this.state);
+    //this works and does in fact add state.
+    // addDoc(colRef, this.state)
+    // .then(() => {
+    //   console.log('added state?')
+    // })
+    //
+
   }, {
     key: "onDragEnd",
     value: function onDragEnd(result) {

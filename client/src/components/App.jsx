@@ -100,10 +100,7 @@ export default class App extends React.Component {
     }
 
     updatedSessions[newId] = newInfo;
-    //need this eventually
-    //this.setState({sessions: updatedSessions});
 
-    //let updatedOrder = this.state.columns[this.state.addedFrom].sessionIds;
 
     const updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
 
@@ -119,39 +116,13 @@ export default class App extends React.Component {
     //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
 
 
-//this.state.addedFrom
-   // columns: {
-    //   'column-1': {
-    //     id: 'column-1',
-    //     title: 'Ideas',
-    //     sessionIds: ['session-1', 'session-2', 'session-3'],
-    //   },
-    //   'column-2': {
-    //     id: 'column-2',
-    //     title: 'Notes',
-    //     sessionIds: [],
-    //   },
-    //   'column-3': {
-    //     id: 'column-3',
-    //     title: 'Suggestions',
-    //     sessionIds: ['session-4'],
-    //   },
-    // },
+    //this.setState({sessions: updatedSessions});
+    this.setState({addSession: false});
 
-    // sessions: {
-    //   'session-1': { id: 'session-1', content: 'Hello switcher' },
-    //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
-    //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
-    //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
-    // },
-
-    // const newState = {
-    //   ...this.state,
-    //   columnOrder: newColumnOrder,
-    // };
+  }
 
 
-    //console.log(this.state.sessions.fromy.content)
+//console.log(this.state.sessions.fromy.content)
    //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)
@@ -160,9 +131,6 @@ export default class App extends React.Component {
     // })
     //
 
-    this.setState({addSession: false});
-
-  }
 
   onDragEnd(result) {
 
