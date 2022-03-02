@@ -243,7 +243,8 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(e, text) {
-      e.preventDefault();
+      e.preventDefault(); //creates updatedSessions to include the newly submitted session
+
       var newSession = {};
       var newId = "session-".concat(this.state.nextNumber);
       var newInfo = {
@@ -253,14 +254,12 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var updatedSessions = _objectSpread({}, this.state.sessions);
 
-      updatedSessions[newId] = newInfo;
+      updatedSessions[newId] = newInfo; //creates updatedOrder to designate the column
+
       var updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
       updatedOrder.push(newId);
       console.log(updatedOrder); //need to put session in array and in the order
-      //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
-      //newArray.push(newSession);
-      // console.log(this.state.columns[this.state.addedFrom].sessionIds);
-      //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
+      //sessionIds
       //this.setState({sessions: updatedSessions});
 
       this.setState({
