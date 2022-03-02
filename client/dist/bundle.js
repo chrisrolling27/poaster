@@ -204,7 +204,8 @@ var App = /*#__PURE__*/function (_React$Component) {
       },
       addSession: false,
       columnOrder: ['column-1', 'column-2', 'column-3'],
-      addedFrom: ''
+      addedFrom: '',
+      nextNumber: 5
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -244,11 +245,35 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitSession",
     value: function submitSession(e, text) {
       e.preventDefault(); //console.log(text);
-
-      console.log(this.state.addedFrom); //just make the session itself (maybe have global counter?) and then separately worry about position
       //let fromy = String(this.state.addedFrom);
       //console.log(fromy);
       //console.log(this.state.sessions.fromy.content);
+
+      console.log(this.state.addedFrom); //just make the session itself (maybe have global counter?) and then separately worry about position
+
+      var newId = "session-".concat(this.state.nextNumber);
+      var newSession = {};
+      var newInfo = {
+        id: newId,
+        content: text
+      };
+      newSession[newId] = newInfo;
+      console.log(newSession); // sessions: {
+      //   'session-1': { id: 'session-1', content: 'Hello switcher' },
+      //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
+      //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
+      //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
+      // },
+      // columns: {
+      //   'column-1': {
+      //     id: 'column-1',
+      //     title: 'Ideas',
+      //     sessionIds: ['session-1', 'session-2', 'session-3'],
+      //   },
+      // const newState = {
+      //   ...this.state,
+      //   columnOrder: newColumnOrder,
+      // };
       //console.log(this.state.sessions.fromy.content)
       //console.log(this.state);
       //this works and does in fact add state.

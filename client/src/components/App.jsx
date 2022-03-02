@@ -48,6 +48,7 @@ export default class App extends React.Component {
       addSession: false,
       columnOrder: ['column-1', 'column-2', 'column-3'],
       addedFrom: '',
+      nextNumber: 5,
 
 
     };
@@ -90,13 +91,51 @@ export default class App extends React.Component {
 
     //console.log(text);
 
+    //let fromy = String(this.state.addedFrom);
+    //console.log(fromy);
+    //console.log(this.state.sessions.fromy.content);
+
     console.log(this.state.addedFrom);
 
     //just make the session itself (maybe have global counter?) and then separately worry about position
 
-    //let fromy = String(this.state.addedFrom);
-    //console.log(fromy);
-    //console.log(this.state.sessions.fromy.content);
+    let newId = `session-${this.state.nextNumber}`;
+    let newSession = {};
+
+    let newInfo = {
+      id: newId,
+      content: text
+    };
+
+    newSession[newId] = newInfo;
+
+    console.log(newSession);
+
+
+    // sessions: {
+    //   'session-1': { id: 'session-1', content: 'Hello switcher' },
+    //   'session-2': { id: 'session-2', content: 'Swiper no swiping' },
+    //   'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
+    //   'session-4': { id: 'session-4', content: 'One more time with feeling' },
+    // },
+
+    // columns: {
+    //   'column-1': {
+    //     id: 'column-1',
+    //     title: 'Ideas',
+    //     sessionIds: ['session-1', 'session-2', 'session-3'],
+    //   },
+
+    // const newState = {
+    //   ...this.state,
+    //   columnOrder: newColumnOrder,
+    // };
+
+
+
+
+
+
 
 
 
