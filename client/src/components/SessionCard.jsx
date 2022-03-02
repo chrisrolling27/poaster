@@ -7,7 +7,6 @@ const Container = styled.div`
   border: 1px solid lightgrey;
   border-radius: 2px;
   margin-bottom: 8px;
-
 `;
 
  const SessionCard = (props) => {

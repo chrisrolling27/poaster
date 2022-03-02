@@ -88,9 +88,20 @@ export default class App extends React.Component {
   submitSession(e, text) {
     e.preventDefault();
 
-    console.log(text);
+    //console.log(text);
+
     console.log(this.state.addedFrom);
 
+    //just make the session itself (maybe have global counter?) and then separately worry about position
+
+    //let fromy = String(this.state.addedFrom);
+    //console.log(fromy);
+    //console.log(this.state.sessions.fromy.content);
+
+
+
+
+    //console.log(this.state.sessions.fromy.content)
    //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)

@@ -243,9 +243,14 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(e, text) {
-      e.preventDefault();
-      console.log(text);
-      console.log(this.state.addedFrom); //console.log(this.state);
+      e.preventDefault(); //console.log(text);
+
+      console.log(this.state.addedFrom); //just make the session itself (maybe have global counter?) and then separately worry about position
+      //let fromy = String(this.state.addedFrom);
+      //console.log(fromy);
+      //console.log(this.state.sessions.fromy.content);
+      //console.log(this.state.sessions.fromy.content)
+      //console.log(this.state);
       //this works and does in fact add state.
       // addDoc(colRef, this.state)
       // .then(() => {
@@ -598,7 +603,7 @@ var _templateObject;
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n\n"])));
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n"])));
 
 var SessionCard = function SessionCard(props) {
   return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_3__["Draggable"], {
