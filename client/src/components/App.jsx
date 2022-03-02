@@ -47,6 +47,7 @@ export default class App extends React.Component {
 
       addSession: false,
       columnOrder: ['column-1', 'column-2', 'column-3'],
+      addedFrom: '',
 
 
     };
@@ -79,21 +80,16 @@ export default class App extends React.Component {
 
   makeSession(e, id) {
 
-    //console.log('boink');
-    console.log(e);
-    console.log(id);
-
-    this.setState({addSession: true});
-
+    //console.log(id);
+    this.setState({addSession: true, addedFrom: id});
 
   }
 
   submitSession(e, text) {
-    //e.preventDefault();
-    //this.setState({addSession: false});
-    console.log(text);
+    e.preventDefault();
 
-   //how to get column id? submit to state from above makesession?
+    console.log(text);
+    console.log(this.state.addedFrom);
 
    //console.log(this.state);
     //this works and does in fact add state.
@@ -102,6 +98,9 @@ export default class App extends React.Component {
     //   console.log('added state?')
     // })
     //
+
+    this.setState({addSession: false});
+
   }
 
   onDragEnd(result) {

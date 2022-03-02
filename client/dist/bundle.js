@@ -203,7 +203,8 @@ var App = /*#__PURE__*/function (_React$Component) {
         }
       },
       addSession: false,
-      columnOrder: ['column-1', 'column-2', 'column-3']
+      columnOrder: ['column-1', 'column-2', 'column-3'],
+      addedFrom: ''
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -233,26 +234,28 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "makeSession",
     value: function makeSession(e, id) {
-      //console.log('boink');
-      console.log(e);
-      console.log(id);
+      //console.log(id);
       this.setState({
-        addSession: true
+        addSession: true,
+        addedFrom: id
       });
     }
   }, {
     key: "submitSession",
     value: function submitSession(e, text) {
-      //e.preventDefault();
-      //this.setState({addSession: false});
-      console.log(text); //how to get column id? submit to state from above makesession?
-      //console.log(this.state);
+      e.preventDefault();
+      console.log(text);
+      console.log(this.state.addedFrom); //console.log(this.state);
       //this works and does in fact add state.
       // addDoc(colRef, this.state)
       // .then(() => {
       //   console.log('added state?')
       // })
       //
+
+      this.setState({
+        addSession: false
+      });
     }
   }, {
     key: "onDragEnd",
