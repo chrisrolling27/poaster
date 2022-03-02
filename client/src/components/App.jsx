@@ -85,22 +85,23 @@ export default class App extends React.Component {
 
     this.setState({addSession: true});
 
-    //console.log(this.state);
+
+  }
+
+  submitSession(e, text) {
+    //e.preventDefault();
+    //this.setState({addSession: false});
+    console.log(text);
+
+   //how to get column id? submit to state from above makesession?
+
+   //console.log(this.state);
     //this works and does in fact add state.
     // addDoc(colRef, this.state)
     // .then(() => {
     //   console.log('added state?')
     // })
     //
-  }
-
-  submitSession(e, text) {
-    e.preventDefault();
-    //console.log(e);
-    console.log(text);
-
-
-   //this.setState({addSession: false});
   }
 
   onDragEnd(result) {

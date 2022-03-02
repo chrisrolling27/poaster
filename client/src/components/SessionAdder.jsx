@@ -1,4 +1,12 @@
 import React from 'react';
+import styled from 'styled-components';
+
+const TextBox = styled.textarea`
+
+  border: 1px solid lightgrey;
+  margin-left: 5px;
+
+`;
 
 class SessionAdder extends React.Component {
 
@@ -20,19 +28,14 @@ class SessionAdder extends React.Component {
 
   render() {
     return (
-      <div className="sessionAdder">
 
         <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
 
+          <TextBox rows="5" cols="50" name="sessiontext" onChange={this.handleChange}>
+          </TextBox>
 
-          <textarea rows="5" cols="50" name="sessiontext" defaultValue="Notes here" onChange={this.handleChange}>
-
-          </textarea>
-
-          <input type="submit" value="submit" />
+          <input type="submit" value="Submit" />
         </form>
-
-      </div>
     );
   }
 }
