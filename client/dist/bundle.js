@@ -244,21 +244,21 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(e, text) {
-      e.preventDefault(); //console.log(text);
-      //let fromy = String(this.state.addedFrom);
-      //console.log(fromy);
-      //console.log(this.state.sessions.fromy.content);
-
-      console.log(this.state.addedFrom); //just make the session itself (maybe have global counter?) and then separately worry about position
-
-      var newId = "session-".concat(this.state.nextNumber);
+      e.preventDefault();
       var newSession = {};
+      var newId = "session-".concat(this.state.nextNumber);
       var newInfo = {
         id: newId,
         content: text
       };
-      newSession[newId] = newInfo;
-      console.log(newSession); //fix this:
+
+      var updatedSessions = _objectSpread({}, this.state.sessions);
+
+      updatedSessions[newId] = newInfo;
+      this.setState({
+        sessions: updatedSessions
+      }); //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
+      //newArray.push(newSession);
       // console.log(this.state.columns[this.state.addedFrom].sessionIds);
       //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
       //this.state.addedFrom

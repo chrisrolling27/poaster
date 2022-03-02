@@ -89,29 +89,26 @@ export default class App extends React.Component {
   submitSession(e, text) {
     e.preventDefault();
 
-    //console.log(text);
-
-    //let fromy = String(this.state.addedFrom);
-    //console.log(fromy);
-    //console.log(this.state.sessions.fromy.content);
-
-    console.log(this.state.addedFrom);
-
-    //just make the session itself (maybe have global counter?) and then separately worry about position
-
-    let newId = `session-${this.state.nextNumber}`;
     let newSession = {};
+    let newId = `session-${this.state.nextNumber}`;
 
     let newInfo = {
       id: newId,
       content: text
     };
 
-    newSession[newId] = newInfo;
+    let updatedSessions = {
+      ...this.state.sessions
+    }
 
-    console.log(newSession);
+    updatedSessions[newId] = newInfo;
 
-    //fix this:
+    this.setState({sessions: updatedSessions});
+
+
+    //let newArray = this.state.columns[this.state.addedFrom].sessionIds;
+    //newArray.push(newSession);
+
    // console.log(this.state.columns[this.state.addedFrom].sessionIds);
     //this.state.columns[this.state.addedFrom].sessionIds.push(newSession);
 
