@@ -202,8 +202,8 @@ var App = /*#__PURE__*/function (_React$Component) {
           sessionIds: ['session-4']
         }
       },
-      addSession: false,
       columnOrder: ['column-1', 'column-2', 'column-3'],
+      addSession: false,
       addedFrom: '',
       nextNumber: 5
     };
@@ -243,28 +243,28 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(e, text) {
-      e.preventDefault(); //creates updatedSessions to include the newly submitted session
-
-      var newSession = {};
+      e.preventDefault();
       var newId = "session-".concat(this.state.nextNumber);
-      var newInfo = {
+      var newSession = {
         id: newId,
         content: text
       };
 
       var updatedSessions = _objectSpread({}, this.state.sessions);
 
-      updatedSessions[newId] = newInfo; //creates updatedOrder to designate the column
-
+      updatedSessions[newId] = newSession;
       var updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
       updatedOrder.push(newId);
-      console.log(updatedOrder); //need to put session in array and in the order
-      //sessionIds
-      //this.setState({sessions: updatedSessions});
+      var oldColumns = this.state.columns;
+      oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
 
-      this.setState({
-        addSession: false
+      var newState = _objectSpread(_objectSpread({}, this.state), {}, {
+        sessions: updatedSessions,
+        addSession: false,
+        columns: oldColumns
       });
+
+      this.setState(newState);
     } //console.log(this.state.sessions.fromy.content)
     //console.log(this.state);
     //this works and does in fact add state.

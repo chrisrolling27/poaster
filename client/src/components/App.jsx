@@ -20,12 +20,14 @@ export default class App extends React.Component {
 
     this.state = {
 
+
       sessions: {
         'session-1': { id: 'session-1', content: 'Hello switcher' },
         'session-2': { id: 'session-2', content: 'Swiper no swiping' },
         'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
         'session-4': { id: 'session-4', content: 'One more time with feeling' },
       },
+
 
       columns: {
         'column-1': {
@@ -45,18 +47,16 @@ export default class App extends React.Component {
         },
       },
 
-      addSession: false,
       columnOrder: ['column-1', 'column-2', 'column-3'],
+      addSession: false,
       addedFrom: '',
       nextNumber: 5,
-
 
     };
 
     this.makeSession = this.makeSession.bind(this);
     this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
-
 
   }
 
@@ -80,56 +80,48 @@ export default class App extends React.Component {
 
 
   makeSession(e, id) {
-    this.setState({addSession: true, addedFrom: id});
+    this.setState({ addSession: true, addedFrom: id });
   }
 
 
   submitSession(e, text) {
     e.preventDefault();
 
-    //creates updatedSessions to include the newly submitted session
-    let newSession = {};
     let newId = `session-${this.state.nextNumber}`;
-
-    let newInfo = {
-      id: newId,
-      content: text
-    };
+    let newSession = { id: newId, content: text };
 
     let updatedSessions = {
       ...this.state.sessions
     }
 
-    updatedSessions[newId] = newInfo;
-
-    //creates updatedOrder to designate the column
+    updatedSessions[newId] = newSession;
 
     let updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
 
     updatedOrder.push(newId);
 
-    console.log(updatedOrder);
+    let oldColumns = this.state.columns;
 
+    oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
 
-    //need to put session in array and in the order
+    let newState = {
+      ...this.state,
+      sessions: updatedSessions,
+      addSession: false,
+      columns: oldColumns
+    }
 
-    //sessionIds
-
-    //this.setState({sessions: updatedSessions});
-    this.setState({addSession: false});
-
+    this.setState(newState);
   }
 
-
-//console.log(this.state.sessions.fromy.content)
-   //console.log(this.state);
-    //this works and does in fact add state.
-    // addDoc(colRef, this.state)
-    // .then(() => {
-    //   console.log('added state?')
-    // })
-    //
-
+  //console.log(this.state.sessions.fromy.content)
+  //console.log(this.state);
+  //this works and does in fact add state.
+  // addDoc(colRef, this.state)
+  // .then(() => {
+  //   console.log('added state?')
+  // })
+  //
 
   onDragEnd(result) {
 
@@ -214,30 +206,30 @@ export default class App extends React.Component {
   render() {
     return (
       <div>
-      <DragDropContext onDragEnd={this.onDragEnd}>
-        <Droppable
-          droppableId="all-columns"
-          direction="horizontal"
-          type="column"
-        >
-          {provided => (
-            <Container
-              {...provided.droppableProps}
-              ref={provided.innerRef}
-            >
-              {this.state.columnOrder.map((columnId, index) => {
-                const column = this.state.columns[columnId];
-                const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
+        <DragDropContext onDragEnd={this.onDragEnd}>
+          <Droppable
+            droppableId="all-columns"
+            direction="horizontal"
+            type="column"
+          >
+            {provided => (
+              <Container
+                {...provided.droppableProps}
+                ref={provided.innerRef}
+              >
+                {this.state.columnOrder.map((columnId, index) => {
+                  const column = this.state.columns[columnId];
+                  const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
 
-                return <Column key={column.id} column={column} sessions={sessions} index={index} makeSession={this.makeSession}/>;
-              })}
-              {provided.placeholder}
-            </Container>
-          )}
-        </Droppable>
-      </DragDropContext>
+                  return <Column key={column.id} column={column} sessions={sessions} index={index} makeSession={this.makeSession} />;
+                })}
+                {provided.placeholder}
+              </Container>
+            )}
+          </Droppable>
+        </DragDropContext>
 
-      {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
+        {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
       </div>
     );
   }
