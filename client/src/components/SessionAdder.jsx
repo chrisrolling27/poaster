@@ -29,13 +29,13 @@ class SessionAdder extends React.Component {
   render() {
     return (
 
-        <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
+      <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
 
-          <TextBox rows="5" cols="50" name="sessiontext" onChange={this.handleChange}>
-          </TextBox>
+        <TextBox rows="5" cols="50" name="sessiontext" onChange={this.handleChange}>
+        </TextBox>
 
-          <input type="submit" value="Submit" />
-        </form>
+        <input type="submit" value="Submit" />
+      </form>
     );
   }
 }

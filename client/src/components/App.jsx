@@ -13,6 +13,8 @@ const Container = styled.div`
 display: flex;
 `;
 
+
+
 export default class App extends React.Component {
 
   constructor(props) {
@@ -46,11 +48,13 @@ export default class App extends React.Component {
         },
       },
 
-      columnOrder: ['column-1', 'column-2', 'column-3'],
       addSession: false,
       addedFrom: '',
       totalSessions: 5,
+      columnOrder: ['column-1', 'column-2', 'column-3'],
       totalColumns: 3,
+      addColumn: false,
+      columnName: '',
 
     };
 
@@ -58,7 +62,8 @@ export default class App extends React.Component {
     this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
     this.makeColumn = this.makeColumn.bind(this);
-
+    this.submitColumn = this.submitColumn.bind(this);
+    this.handleChange = this.handleChange.bind(this);
   }
 
   componentDidMount() {
@@ -113,7 +118,8 @@ export default class App extends React.Component {
       sessions: updatedSessions,
       addSession: false,
       columns: oldColumns,
-      totalSessions: newTotal
+      totalSessions: newTotal,
+
     }
 
     this.setState(newState);
@@ -129,14 +135,19 @@ export default class App extends React.Component {
   // })
   //
 
-  makeColumn() {
-    //make a ? toggle for the form below
-    console.log('click')
+  makeColumn(e) {
+    this.setState({ addColumn: true });
+  }
+
+  handleChange(e) {
+    this.setState({ columnName: e.target.value });
   }
 
 
-  submitColumn() {
-    console.log('submitted');
+  submitColumn(e) {
+    e.preventDefault();
+    console.log('submitted!!!');
+    this.setState({ addColumn: false });
   }
 
 
@@ -248,10 +259,17 @@ export default class App extends React.Component {
         {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
 
         <button onClick={this.makeColumn}>+Column</button>
+        {this.state.addColumn ?
+          <form onSubmit={(e) => this.submitColumn(e)}>
+            <label> Column Name: </label>
+            <input type="text" onChange={this.handleChange}/>
+            <input type="submit" value="Submit!" />
+          </form> : ''}
       </div>
     );
   }
 }
+
 
 //DB SETUP
 const app = initializeApp(firebaseConfig);

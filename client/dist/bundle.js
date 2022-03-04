@@ -202,16 +202,20 @@ var App = /*#__PURE__*/function (_React$Component) {
           sessionIds: ['session-4']
         }
       },
-      columnOrder: ['column-1', 'column-2', 'column-3'],
       addSession: false,
       addedFrom: '',
       totalSessions: 5,
-      totalColumns: 3
+      columnOrder: ['column-1', 'column-2', 'column-3'],
+      totalColumns: 3,
+      addColumn: false,
+      columnName: ''
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.makeColumn = _this.makeColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
+    _this.submitColumn = _this.submitColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
+    _this.handleChange = _this.handleChange.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     return _this;
   }
 
@@ -280,14 +284,26 @@ var App = /*#__PURE__*/function (_React$Component) {
 
   }, {
     key: "makeColumn",
-    value: function makeColumn() {
-      //make a ? toggle for the form below
-      console.log('click');
+    value: function makeColumn(e) {
+      this.setState({
+        addColumn: true
+      });
+    }
+  }, {
+    key: "handleChange",
+    value: function handleChange(e) {
+      this.setState({
+        columnName: e.target.value
+      });
     }
   }, {
     key: "submitColumn",
-    value: function submitColumn() {
-      console.log('submitted');
+    value: function submitColumn(e) {
+      e.preventDefault();
+      console.log('submitted!!!');
+      this.setState({
+        addColumn: false
+      });
     }
   }, {
     key: "onDragEnd",
@@ -391,7 +407,17 @@ var App = /*#__PURE__*/function (_React$Component) {
         submitSession: this.submitSession
       }, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
         onClick: this.makeColumn
-      }, "+Column"));
+      }, "+Column"), this.state.addColumn ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("form", {
+        onSubmit: function onSubmit(e) {
+          return _this2.submitColumn(e);
+        }
+      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("label", null, " Column Name: "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
+        type: "text",
+        onChange: this.handleChange
+      }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
+        type: "submit",
+        value: "Submit!"
+      })) : '');
     }
   }]);
 
