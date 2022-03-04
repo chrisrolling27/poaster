@@ -14,7 +14,6 @@ display: flex;
 `;
 
 
-
 export default class App extends React.Component {
 
   constructor(props) {
@@ -28,7 +27,6 @@ export default class App extends React.Component {
         'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
         'session-4': { id: 'session-4', content: 'One more time with feeling' },
       },
-
 
       columns: {
         'column-1': {
@@ -83,8 +81,6 @@ export default class App extends React.Component {
         console.log(err.message);
       })
   }
-
-
 
   makeSession(e, id) {
     this.setState({ addSession: true, addedFrom: id });
@@ -147,8 +143,19 @@ export default class App extends React.Component {
   submitColumn(e) {
     e.preventDefault();
     console.log('submitted!!!');
+
+
     this.setState({ addColumn: false });
   }
+
+  // let newId = `session-${this.state.totalSessions}`;
+  // let newSession = { id: newId, content: text };
+
+  // let updatedSessions = {
+  //   ...this.state.sessions
+  // }
+
+  // updatedSessions[newId] = newSession;
 
 
   onDragEnd(result) {

@@ -304,7 +304,13 @@ var App = /*#__PURE__*/function (_React$Component) {
       this.setState({
         addColumn: false
       });
-    }
+    } // let newId = `session-${this.state.totalSessions}`;
+    // let newSession = { id: newId, content: text };
+    // let updatedSessions = {
+    //   ...this.state.sessions
+    // }
+    // updatedSessions[newId] = newSession;
+
   }, {
     key: "onDragEnd",
     value: function onDragEnd(result) {
