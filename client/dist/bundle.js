@@ -134,7 +134,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-var _templateObject;
+var _templateObject, _templateObject2;
 
 function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); if (enumerableOnly) { symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; }); } keys.push.apply(keys, symbols); } return keys; }
 
@@ -154,6 +154,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
+var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px;\n  background-color: orange;\n"])));
 
 var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_5___default()(App, _React$Component);
@@ -242,7 +243,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "makeSession",
     value: function makeSession(e, id) {
       this.setState({
-        addSession: true,
+        addSession: !this.state.addSession,
         addedFrom: id
       });
     }
@@ -286,7 +287,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "makeColumn",
     value: function makeColumn(e) {
       this.setState({
-        addColumn: true
+        addColumn: !this.state.addColumn
       });
     }
   }, {
@@ -413,17 +414,17 @@ var App = /*#__PURE__*/function (_React$Component) {
         submitSession: this.submitSession
       }, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
         onClick: this.makeColumn
-      }, "+Column"), this.state.addColumn ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("form", {
+      }, "+ Column"), this.state.addColumn ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(FormContainer, null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("form", {
         onSubmit: function onSubmit(e) {
           return _this2.submitColumn(e);
         }
-      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("label", null, " Column Name: "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
+      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("label", null, " Title: "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
         type: "text",
         onChange: this.handleChange
       }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
         type: "submit",
-        value: "Submit!"
-      })) : '');
+        value: "Submit"
+      })), " ") : '');
     }
   }]);
 

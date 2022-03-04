@@ -13,6 +13,10 @@ const Container = styled.div`
 display: flex;
 `;
 
+const FormContainer = styled.div`
+  paddings: 8px;
+  background-color: orange;
+`;
 
 export default class App extends React.Component {
 
@@ -83,7 +87,7 @@ export default class App extends React.Component {
   }
 
   makeSession(e, id) {
-    this.setState({ addSession: true, addedFrom: id });
+    this.setState({ addSession: !this.state.addSession, addedFrom: id });
   }
 
 
@@ -132,7 +136,7 @@ export default class App extends React.Component {
   //
 
   makeColumn(e) {
-    this.setState({ addColumn: true });
+    this.setState({ addColumn: !this.state.addColumn });
   }
 
   handleChange(e) {
@@ -265,13 +269,16 @@ export default class App extends React.Component {
 
         {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
 
-        <button onClick={this.makeColumn}>+Column</button>
+        <button onClick={this.makeColumn}>+ Column</button>
         {this.state.addColumn ?
+          <FormContainer>
           <form onSubmit={(e) => this.submitColumn(e)}>
-            <label> Column Name: </label>
-            <input type="text" onChange={this.handleChange}/>
-            <input type="submit" value="Submit!" />
-          </form> : ''}
+            <label> Title: </label>
+            <input type="text" onChange={this.handleChange} />
+            <input type="submit" value="Submit" />
+          </form> </FormContainer>
+            : ''}
+
       </div>
     );
   }
