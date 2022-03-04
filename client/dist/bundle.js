@@ -205,11 +205,13 @@ var App = /*#__PURE__*/function (_React$Component) {
       columnOrder: ['column-1', 'column-2', 'column-3'],
       addSession: false,
       addedFrom: '',
-      nextNumber: 5
+      totalSessions: 5,
+      totalColumns: 3
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
+    _this.makeColumn = _this.makeColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     return _this;
   }
 
@@ -244,7 +246,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitSession",
     value: function submitSession(e, text) {
       e.preventDefault();
-      var newId = "session-".concat(this.state.nextNumber);
+      var newId = "session-".concat(this.state.totalSessions);
       var newSession = {
         id: newId,
         content: text
@@ -257,11 +259,13 @@ var App = /*#__PURE__*/function (_React$Component) {
       updatedOrder.push(newId);
       var oldColumns = this.state.columns;
       oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
+      var newTotal = this.state.totalSessions + 1;
 
       var newState = _objectSpread(_objectSpread({}, this.state), {}, {
         sessions: updatedSessions,
         addSession: false,
-        columns: oldColumns
+        columns: oldColumns,
+        totalSessions: newTotal
       });
 
       this.setState(newState);
@@ -274,6 +278,17 @@ var App = /*#__PURE__*/function (_React$Component) {
     // })
     //
 
+  }, {
+    key: "makeColumn",
+    value: function makeColumn() {
+      //make a ? toggle for the form below
+      console.log('click');
+    }
+  }, {
+    key: "submitColumn",
+    value: function submitColumn() {
+      console.log('submitted');
+    }
   }, {
     key: "onDragEnd",
     value: function onDragEnd(result) {
@@ -374,7 +389,9 @@ var App = /*#__PURE__*/function (_React$Component) {
         }), provided.placeholder);
       })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
         submitSession: this.submitSession
-      }, " ") : '');
+      }, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
+        onClick: this.makeColumn
+      }, "+Column"));
     }
   }]);
 

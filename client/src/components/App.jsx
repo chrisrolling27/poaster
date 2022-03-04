@@ -20,7 +20,6 @@ export default class App extends React.Component {
 
     this.state = {
 
-
       sessions: {
         'session-1': { id: 'session-1', content: 'Hello switcher' },
         'session-2': { id: 'session-2', content: 'Swiper no swiping' },
@@ -50,13 +49,15 @@ export default class App extends React.Component {
       columnOrder: ['column-1', 'column-2', 'column-3'],
       addSession: false,
       addedFrom: '',
-      nextNumber: 5,
+      totalSessions: 5,
+      totalColumns: 3,
 
     };
 
     this.makeSession = this.makeSession.bind(this);
     this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
+    this.makeColumn = this.makeColumn.bind(this);
 
   }
 
@@ -79,6 +80,7 @@ export default class App extends React.Component {
   }
 
 
+
   makeSession(e, id) {
     this.setState({ addSession: true, addedFrom: id });
   }
@@ -87,7 +89,7 @@ export default class App extends React.Component {
   submitSession(e, text) {
     e.preventDefault();
 
-    let newId = `session-${this.state.nextNumber}`;
+    let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
 
     let updatedSessions = {
@@ -104,15 +106,19 @@ export default class App extends React.Component {
 
     oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
 
+    let newTotal = this.state.totalSessions + 1;
+
     let newState = {
       ...this.state,
       sessions: updatedSessions,
       addSession: false,
-      columns: oldColumns
+      columns: oldColumns,
+      totalSessions: newTotal
     }
 
     this.setState(newState);
   }
+
 
   //console.log(this.state.sessions.fromy.content)
   //console.log(this.state);
@@ -122,6 +128,17 @@ export default class App extends React.Component {
   //   console.log('added state?')
   // })
   //
+
+  makeColumn() {
+    //make a ? toggle for the form below
+    console.log('click')
+  }
+
+
+  submitColumn() {
+    console.log('submitted');
+  }
+
 
   onDragEnd(result) {
 
@@ -150,7 +167,6 @@ export default class App extends React.Component {
       this.setState(newState);
       return;
     }
-
 
     const start = this.state.columns[source.droppableId];
     const finish = this.state.columns[destination.droppableId];
@@ -230,6 +246,8 @@ export default class App extends React.Component {
         </DragDropContext>
 
         {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
+
+        <button onClick={this.makeColumn}>+Column</button>
       </div>
     );
   }
