@@ -133,7 +133,7 @@ export default class App extends React.Component {
   // .then(() => {
   //   console.log('added state?')
   // })
-  //
+  ////
 
   makeColumn(e) {
     this.setState({ addColumn: !this.state.addColumn });
