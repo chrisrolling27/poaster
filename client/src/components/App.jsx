@@ -148,6 +148,7 @@ export default class App extends React.Component {
     e.preventDefault();
     console.log('submitted!!!');
 
+    
 
     this.setState({ addColumn: false });
   }
