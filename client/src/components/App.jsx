@@ -125,7 +125,6 @@ export default class App extends React.Component {
     this.setState(newState);
   }
 
-
   //console.log(this.state.sessions.fromy.content)
   //console.log(this.state);
   //this works and does in fact add state.
@@ -134,6 +133,7 @@ export default class App extends React.Component {
   //   console.log('added state?')
   // })
   ////
+
 
   makeColumn(e) {
     this.setState({ addColumn: !this.state.addColumn });
@@ -144,23 +144,69 @@ export default class App extends React.Component {
   }
 
 
+  // columns: {
+  //   'column-1': {
+  //     id: 'column-1',
+  //     title: 'Ideas',
+  //     sessionIds: ['session-1', 'session-2', 'session-3'],
+  //   },
+
+
+
   submitColumn(e) {
     e.preventDefault();
-    console.log('submitted!!!');
+    console.log(this.state.columnName);
 
-    
+
+    let newColNum = this.state.totalColumns + 1;
+    let newId = `column-${newColNum}`;
+
+    let newSession = { id: newId, title: this.state.columnName, sessionIds: [] };
+
+
+
+
 
     this.setState({ addColumn: false });
   }
 
-  // let newId = `session-${this.state.totalSessions}`;
-  // let newSession = { id: newId, content: text };
 
-  // let updatedSessions = {
-  //   ...this.state.sessions
+
+  // submitSession(e, text) {
+  //   e.preventDefault();
+
+  //   let newId = `session-${this.state.totalSessions}`;
+  //   let newSession = { id: newId, content: text };
+
+  //   let updatedSessions = {
+  //     ...this.state.sessions
+  //   }
+
+  //   updatedSessions[newId] = newSession;
+
+  //   let updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+
+  //   updatedOrder.push(newId);
+
+  //   let oldColumns = this.state.columns;
+
+  //   oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
+
+  //   let newTotal = this.state.totalSessions + 1;
+
+  //   let newState = {
+  //     ...this.state,
+  //     sessions: updatedSessions,
+  //     addSession: false,
+  //     columns: oldColumns,
+  //     totalSessions: newTotal,
+
+  //   }
+
+  //   this.setState(newState);
   // }
 
-  // updatedSessions[newId] = newSession;
+
 
 
   onDragEnd(result) {

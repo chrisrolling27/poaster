@@ -296,21 +296,50 @@ var App = /*#__PURE__*/function (_React$Component) {
       this.setState({
         columnName: e.target.value
       });
-    }
+    } // columns: {
+    //   'column-1': {
+    //     id: 'column-1',
+    //     title: 'Ideas',
+    //     sessionIds: ['session-1', 'session-2', 'session-3'],
+    //   },
+
   }, {
     key: "submitColumn",
     value: function submitColumn(e) {
       e.preventDefault();
-      console.log('submitted!!!');
+      console.log(this.state.columnName);
+      var newColNum = this.state.totalColumns + 1;
+      var newId = "column-".concat(newColNum);
+      var newSession = {
+        id: newId,
+        title: this.state.columnName,
+        sessionIds: []
+      };
       this.setState({
         addColumn: false
       });
-    } // let newId = `session-${this.state.totalSessions}`;
-    // let newSession = { id: newId, content: text };
-    // let updatedSessions = {
-    //   ...this.state.sessions
+    } // submitSession(e, text) {
+    //   e.preventDefault();
+    //   let newId = `session-${this.state.totalSessions}`;
+    //   let newSession = { id: newId, content: text };
+    //   let updatedSessions = {
+    //     ...this.state.sessions
+    //   }
+    //   updatedSessions[newId] = newSession;
+    //   let updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+    //   updatedOrder.push(newId);
+    //   let oldColumns = this.state.columns;
+    //   oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
+    //   let newTotal = this.state.totalSessions + 1;
+    //   let newState = {
+    //     ...this.state,
+    //     sessions: updatedSessions,
+    //     addSession: false,
+    //     columns: oldColumns,
+    //     totalSessions: newTotal,
+    //   }
+    //   this.setState(newState);
     // }
-    // updatedSessions[newId] = newSession;
 
   }, {
     key: "onDragEnd",
