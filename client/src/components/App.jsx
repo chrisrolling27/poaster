@@ -118,8 +118,7 @@ export default class App extends React.Component {
       sessions: updatedSessions,
       addSession: false,
       columns: oldColumns,
-      totalSessions: newTotal,
-
+      totalSessions: newTotal
     }
 
     this.setState(newState);
@@ -157,15 +156,20 @@ export default class App extends React.Component {
     e.preventDefault();
     console.log(this.state.columnName);
 
+    //need to increment totalColumns later on
+    let newId = `column-${this.state.totalColumns + 1}`;
 
-    let newColNum = this.state.totalColumns + 1;
-    let newId = `column-${newColNum}`;
-
-    let newSession = { id: newId, title: this.state.columnName, sessionIds: [] };
-
-
+    //create new column with inputted title
+    let newColumn= { id: newId, title: this.state.columnName, sessionIds: [] };
+    let updatedColumns = this.state.columns;
+    updatedColumns[newId] = newColumn;
 
 
+    let updatedColumnOrder = this.state.columnOrder;
+
+    updatedColumnOrder.push(newId);
+
+    console.log(updatedColumnOrder);
 
     this.setState({ addColumn: false });
   }

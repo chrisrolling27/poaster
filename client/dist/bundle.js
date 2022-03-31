@@ -307,14 +307,20 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitColumn",
     value: function submitColumn(e) {
       e.preventDefault();
-      console.log(this.state.columnName);
-      var newColNum = this.state.totalColumns + 1;
-      var newId = "column-".concat(newColNum);
-      var newSession = {
+      console.log(this.state.columnName); //need to increment totalColumns later on
+
+      var newId = "column-".concat(this.state.totalColumns + 1); //create new column with inputted title
+
+      var newColumn = {
         id: newId,
         title: this.state.columnName,
         sessionIds: []
       };
+      var updatedColumns = this.state.columns;
+      updatedColumns[newId] = newColumn;
+      var updatedColumnOrder = this.state.columnOrder;
+      updatedColumnOrder.push(newId);
+      console.log(updatedColumnOrder);
       this.setState({
         addColumn: false
       });
