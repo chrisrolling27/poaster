@@ -306,8 +306,7 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitColumn",
     value: function submitColumn(e) {
-      e.preventDefault();
-      console.log(this.state.columnName); //need to increment totalColumns later on
+      e.preventDefault(); //need to increment totalColumns later on
 
       var newId = "column-".concat(this.state.totalColumns + 1); //create new column with inputted title
 
@@ -318,11 +317,13 @@ var App = /*#__PURE__*/function (_React$Component) {
       };
       var updatedColumns = this.state.columns;
       updatedColumns[newId] = newColumn;
-      var updatedColumnOrder = this.state.columnOrder;
+      var updatedColumnOrder = this.state.columnOrder; //Dont understand why I can get away without updatedColumnOrder state update
+
       updatedColumnOrder.push(newId);
-      console.log(updatedColumnOrder);
+      var incrementCol = this.state.totalColumns + 1;
       this.setState({
-        addColumn: false
+        addColumn: false,
+        totalColumns: incrementCol
       });
     } // submitSession(e, text) {
     //   e.preventDefault();

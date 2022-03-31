@@ -154,24 +154,22 @@ export default class App extends React.Component {
 
   submitColumn(e) {
     e.preventDefault();
-    console.log(this.state.columnName);
 
     //need to increment totalColumns later on
     let newId = `column-${this.state.totalColumns + 1}`;
-
+    
     //create new column with inputted title
     let newColumn= { id: newId, title: this.state.columnName, sessionIds: [] };
     let updatedColumns = this.state.columns;
     updatedColumns[newId] = newColumn;
 
-
     let updatedColumnOrder = this.state.columnOrder;
-
+    //Dont understand why I can get away without updatedColumnOrder state update
     updatedColumnOrder.push(newId);
 
-    console.log(updatedColumnOrder);
+    let incrementCol = this.state.totalColumns + 1;
 
-    this.setState({ addColumn: false });
+    this.setState({ addColumn: false, totalColumns : incrementCol });
   }
 
 
