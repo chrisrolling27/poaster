@@ -142,24 +142,14 @@ export default class App extends React.Component {
     this.setState({ columnName: e.target.value });
   }
 
-
-  // columns: {
-  //   'column-1': {
-  //     id: 'column-1',
-  //     title: 'Ideas',
-  //     sessionIds: ['session-1', 'session-2', 'session-3'],
-  //   },
-
-
-
   submitColumn(e) {
     e.preventDefault();
 
     //need to increment totalColumns later on
     let newId = `column-${this.state.totalColumns + 1}`;
-    
+
     //create new column with inputted title
-    let newColumn= { id: newId, title: this.state.columnName, sessionIds: [] };
+    let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
     let updatedColumns = this.state.columns;
     updatedColumns[newId] = newColumn;
 
@@ -169,46 +159,8 @@ export default class App extends React.Component {
 
     let incrementCol = this.state.totalColumns + 1;
 
-    this.setState({ addColumn: false, totalColumns : incrementCol });
+    this.setState({ addColumn: false, totalColumns: incrementCol });
   }
-
-
-
-  // submitSession(e, text) {
-  //   e.preventDefault();
-
-  //   let newId = `session-${this.state.totalSessions}`;
-  //   let newSession = { id: newId, content: text };
-
-  //   let updatedSessions = {
-  //     ...this.state.sessions
-  //   }
-
-  //   updatedSessions[newId] = newSession;
-
-  //   let updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
-
-  //   updatedOrder.push(newId);
-
-  //   let oldColumns = this.state.columns;
-
-  //   oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
-
-  //   let newTotal = this.state.totalSessions + 1;
-
-  //   let newState = {
-  //     ...this.state,
-  //     sessions: updatedSessions,
-  //     addSession: false,
-  //     columns: oldColumns,
-  //     totalSessions: newTotal,
-
-  //   }
-
-  //   this.setState(newState);
-  // }
-
-
 
 
   onDragEnd(result) {
@@ -321,12 +273,12 @@ export default class App extends React.Component {
         <button onClick={this.makeColumn}>+ Column</button>
         {this.state.addColumn ?
           <FormContainer>
-          <form onSubmit={(e) => this.submitColumn(e)}>
-            <label> Title: </label>
-            <input type="text" onChange={this.handleChange} />
-            <input type="submit" value="Submit" />
-          </form> </FormContainer>
-            : ''}
+            <form onSubmit={(e) => this.submitColumn(e)}>
+              <label> Title: </label>
+              <input type="text" onChange={this.handleChange} />
+              <input type="submit" value="Submit" />
+            </form> </FormContainer>
+          : ''}
 
       </div>
     );
