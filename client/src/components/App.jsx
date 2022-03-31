@@ -145,19 +145,16 @@ export default class App extends React.Component {
   submitColumn(e) {
     e.preventDefault();
 
-    //need to increment totalColumns later on
-    let newId = `column-${this.state.totalColumns + 1}`;
+    let incrementCol = this.state.totalColumns + 1;
+    let newId = `column-${incrementCol}`;
 
-    //create new column with inputted title
     let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
     let updatedColumns = this.state.columns;
     updatedColumns[newId] = newColumn;
 
+    //Not sure why columns update without updatedColumnOrder state update
     let updatedColumnOrder = this.state.columnOrder;
-    //Dont understand why I can get away without updatedColumnOrder state update
     updatedColumnOrder.push(newId);
-
-    let incrementCol = this.state.totalColumns + 1;
 
     this.setState({ addColumn: false, totalColumns: incrementCol });
   }

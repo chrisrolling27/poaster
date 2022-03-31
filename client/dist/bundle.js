@@ -300,21 +300,19 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitColumn",
     value: function submitColumn(e) {
-      e.preventDefault(); //need to increment totalColumns later on
-
-      var newId = "column-".concat(this.state.totalColumns + 1); //create new column with inputted title
-
+      e.preventDefault();
+      var incrementCol = this.state.totalColumns + 1;
+      var newId = "column-".concat(incrementCol);
       var newColumn = {
         id: newId,
         title: this.state.columnName,
         sessionIds: []
       };
       var updatedColumns = this.state.columns;
-      updatedColumns[newId] = newColumn;
-      var updatedColumnOrder = this.state.columnOrder; //Dont understand why I can get away without updatedColumnOrder state update
+      updatedColumns[newId] = newColumn; //Not sure why columns update without updatedColumnOrder state update
 
+      var updatedColumnOrder = this.state.columnOrder;
       updatedColumnOrder.push(newId);
-      var incrementCol = this.state.totalColumns + 1;
       this.setState({
         addColumn: false,
         totalColumns: incrementCol
