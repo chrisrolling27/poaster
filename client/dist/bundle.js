@@ -411,9 +411,7 @@ var App = /*#__PURE__*/function (_React$Component) {
             makeSession: _this2.makeSession
           });
         }), provided.placeholder);
-      })), this.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
-        submitSession: this.submitSession
-      }, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
+      })), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("button", {
         onClick: this.makeColumn
       }, "+ Column"), this.state.addColumn ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(FormContainer, null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("form", {
         onSubmit: function onSubmit(e) {
@@ -507,7 +505,9 @@ var Column = /*#__PURE__*/function (_React$Component) {
     _babel_runtime_helpers_classCallCheck__WEBPACK_IMPORTED_MODULE_1___default()(this, Column);
 
     _this = _super.call(this, props);
-    _this.state = {};
+    _this.state = {
+      addSession: false
+    };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     return _this;
   }
@@ -515,7 +515,10 @@ var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_createClass__WEBPACK_IMPORTED_MODULE_2___default()(Column, [{
     key: "makeSession",
     value: function makeSession(e, id) {
-      console.log('make sesh'); //this.setState({ addSession: !this.state.addSession, addedFrom: id });
+      console.log('make sesh');
+      this.setState({
+        addSession: true
+      });
     }
   }, {
     key: "render",
@@ -541,7 +544,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
               index: index
             });
           }), provided.placeholder);
-        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
+        }), _this2.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], null, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
           onClick: function onClick(e) {
             return _this2.makeSession(e, _this2.props.column.id);
           }
@@ -637,7 +640,7 @@ var SessionAdder = /*#__PURE__*/function (_React$Component) {
         }
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(TextBox, {
         rows: "3",
-        cols: "20",
+        cols: "15",
         name: "sessiontext",
         onChange: this.handleChange
       }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("input", {

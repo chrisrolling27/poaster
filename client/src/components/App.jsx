@@ -264,7 +264,7 @@ export default class App extends React.Component {
           </Droppable>
         </DragDropContext>
 
-        {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
+        {/* {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''} */}
 
         <button onClick={this.makeColumn}>+ Column</button>
         {this.state.addColumn ?

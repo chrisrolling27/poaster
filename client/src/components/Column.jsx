@@ -30,7 +30,7 @@ export default class Column extends React.Component {
     super(props);
 
     this.state = {
-
+      addSession: false
     };
 
     this.makeSession = this.makeSession.bind(this);
@@ -39,7 +39,7 @@ export default class Column extends React.Component {
 
  makeSession(e, id) {
     console.log('make sesh');
-    //this.setState({ addSession: !this.state.addSession, addedFrom: id });
+    this.setState({ addSession: true });
   }
   
 
@@ -65,6 +65,8 @@ export default class Column extends React.Component {
                 </SessionList>
               )}
             </Droppable>
+
+            {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
             <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
           </Container>
         )}
