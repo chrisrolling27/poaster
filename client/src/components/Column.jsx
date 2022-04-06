@@ -24,9 +24,7 @@ const SessionList = styled.div`
   flex-grow: 1;
 `;
 
-
 export default class Column extends React.Component {
-
 
   render() {
     return (
@@ -37,7 +35,6 @@ export default class Column extends React.Component {
             <Title {...provided.dragHandleProps}>
               {this.props.column.title}
             </Title>
-            <button onClick={(e) => this.props.makeSession(e, this.props.column.id)}> + </button>
             <Droppable droppableId={this.props.column.id} type="session">
               {provided => (
                 <SessionList
@@ -51,6 +48,7 @@ export default class Column extends React.Component {
                 </SessionList>
               )}
             </Droppable>
+            <button onClick={(e) => this.props.makeSession(e, this.props.column.id)}> + Add a Card </button>
           </Container>
         )}
       </Draggable>
