@@ -26,6 +26,23 @@ const SessionList = styled.div`
 
 export default class Column extends React.Component {
 
+  constructor(props) {
+    super(props);
+
+    this.state = {
+
+    };
+
+    this.makeSession = this.makeSession.bind(this);
+   
+  }
+
+ makeSession(e, id) {
+    console.log('make sesh');
+    //this.setState({ addSession: !this.state.addSession, addedFrom: id });
+  }
+  
+
   render() {
     return (
       <Draggable draggableId={this.props.column.id} index={this.props.index}>
@@ -48,7 +65,7 @@ export default class Column extends React.Component {
                 </SessionList>
               )}
             </Droppable>
-            <button onClick={(e) => this.props.makeSession(e, this.props.column.id)}> + Add a Card </button>
+            <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
           </Container>
         )}
       </Draggable>

@@ -59,7 +59,7 @@ export default class App extends React.Component {
 
     };
 
-    this.makeSession = this.makeSession.bind(this);
+    //this.makeSession = this.makeSession.bind(this);
     this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
     this.makeColumn = this.makeColumn.bind(this);
@@ -85,9 +85,9 @@ export default class App extends React.Component {
       })
   }
 
-  makeSession(e, id) {
-    this.setState({ addSession: !this.state.addSession, addedFrom: id });
-  }
+  // makeSession(e, id) {
+  //   this.setState({ addSession: !this.state.addSession, addedFrom: id });
+  // }
 
 
   submitSession(e, text) {
