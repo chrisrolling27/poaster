@@ -628,8 +628,8 @@ var SessionAdder = /*#__PURE__*/function (_React$Component) {
           return _this2.props.submitSession(e, _this2.state.sessionText);
         }
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement(TextBox, {
-        rows: "5",
-        cols: "50",
+        rows: "3",
+        cols: "20",
         name: "sessiontext",
         onChange: this.handleChange
       }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_7___default.a.createElement("input", {

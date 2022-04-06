@@ -8,7 +8,6 @@ import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
 
-
 const Container = styled.div`
 display: flex;
 `;
