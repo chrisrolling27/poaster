@@ -66,7 +66,7 @@ export default class Column extends React.Component {
               )}
             </Droppable>
 
-            {this.state.addSession ? <SessionAdder> </SessionAdder> : ''}
+            {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
             <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
           </Container>
         )}

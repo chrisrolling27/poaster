@@ -544,7 +544,9 @@ var Column = /*#__PURE__*/function (_React$Component) {
               index: index
             });
           }), provided.placeholder);
-        }), _this2.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], null, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
+        }), _this2.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_SessionAdder_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
+          submitSession: _this2.submitSession
+        }, " ") : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
           onClick: function onClick(e) {
             return _this2.makeSession(e, _this2.props.column.id);
           }
