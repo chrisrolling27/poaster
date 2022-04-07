@@ -244,7 +244,6 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitSession",
     value: function submitSession(e, addedFrom, text) {
       e.preventDefault();
-      console.log('added from: ', addedFrom);
       var newId = "session-".concat(this.state.totalSessions);
       var newSession = {
         id: newId,
@@ -254,10 +253,10 @@ var App = /*#__PURE__*/function (_React$Component) {
       var updatedSessions = _objectSpread({}, this.state.sessions);
 
       updatedSessions[newId] = newSession;
-      var updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+      var updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
       updatedOrder.push(newId);
       var oldColumns = this.state.columns;
-      oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
+      oldColumns[addedFrom].sessionIds = updatedOrder;
       var newTotal = this.state.totalSessions + 1;
 
       var newState = _objectSpread(_objectSpread({}, this.state), {}, {

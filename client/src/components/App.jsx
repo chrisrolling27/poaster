@@ -91,8 +91,6 @@ export default class App extends React.Component {
   submitSession(e, addedFrom, text) {
     e.preventDefault();
 
-    console.log('added from: ', addedFrom);
-
     let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
 
@@ -102,13 +100,13 @@ export default class App extends React.Component {
 
     updatedSessions[newId] = newSession;
 
-    let updatedOrder = Array.from(this.state.columns[this.state.addedFrom].sessionIds);
+    let updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
 
     updatedOrder.push(newId);
 
     let oldColumns = this.state.columns;
 
-    oldColumns[this.state.addedFrom].sessionIds = updatedOrder;
+    oldColumns[addedFrom].sessionIds = updatedOrder;
 
     let newTotal = this.state.totalSessions + 1;
 
