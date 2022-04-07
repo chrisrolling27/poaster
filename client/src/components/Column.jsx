@@ -24,24 +24,36 @@ const SessionList = styled.div`
   flex-grow: 1;
 `;
 
+const TextBox = styled.textarea`
+  border: 1px solid lightgrey;
+  margin-left: 5px;
+`;
+
+
 export default class Column extends React.Component {
 
   constructor(props) {
     super(props);
 
     this.state = {
-      addSession: false
+      addSession: false,
+      sessionText: ''
     };
 
     this.makeSession = this.makeSession.bind(this);
-   
+    this.handleChange = this.handleChange.bind(this);
+
   }
 
- makeSession(e, id) {
+  makeSession(e, id) {
     console.log('make sesh');
     this.setState({ addSession: true });
   }
-  
+
+  handleChange(e) {
+    this.setState({ sessionText: e.target.value })
+  }
+
 
   render() {
     return (
@@ -66,7 +78,13 @@ export default class Column extends React.Component {
               )}
             </Droppable>
 
-            {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''}
+            {this.state.addSession ? <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
+              <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
+              </TextBox>
+              <input type="submit" value="Submit" />
+            </form> : ''}
+
+
             <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
           </Container>
         )}

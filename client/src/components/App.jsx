@@ -92,6 +92,7 @@ export default class App extends React.Component {
 
   submitSession(e, text) {
     e.preventDefault();
+    console.log('submitSession triggered');
     
     let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
