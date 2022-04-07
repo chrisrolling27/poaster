@@ -47,6 +47,7 @@ export default class Column extends React.Component {
 
   makeSession(e, id) {
     console.log('make sesh');
+    console.log(id);
     this.setState({ addSession: true });
   }
 
@@ -78,6 +79,7 @@ export default class Column extends React.Component {
               )}
             </Droppable>
 
+
             {this.state.addSession ?
               <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
                 <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
@@ -85,8 +87,8 @@ export default class Column extends React.Component {
                 <input type="submit" value="Submit" />
               </form> : ''}
 
-
             <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
+
           </Container>
         )}
       </Draggable>

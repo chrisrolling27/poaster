@@ -521,6 +521,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
     key: "makeSession",
     value: function makeSession(e, id) {
       console.log('make sesh');
+      console.log(id);
       this.setState({
         addSession: true
       });
