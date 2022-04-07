@@ -256,8 +256,7 @@ export default class App extends React.Component {
                 {this.state.columnOrder.map((columnId, index) => {
                   const column = this.state.columns[columnId];
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
-
-                  return <Column key={column.id} column={column} sessions={sessions} index={index} makeSession={this.makeSession} />;
+                  return <Column key={column.id} column={column} submitSession={this.submitSession} sessions={sessions} index={index} makeSession={this.makeSession} />;
                 })}
                 {provided.placeholder}
               </Container>

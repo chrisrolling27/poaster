@@ -78,11 +78,12 @@ export default class Column extends React.Component {
               )}
             </Droppable>
 
-            {this.state.addSession ? <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
-              <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
-              </TextBox>
-              <input type="submit" value="Submit" />
-            </form> : ''}
+            {this.state.addSession ?
+              <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
+                <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
+                </TextBox>
+                <input type="submit" value="Submit" />
+              </form> : ''}
 
 
             <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>

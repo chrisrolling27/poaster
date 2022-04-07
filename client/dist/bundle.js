@@ -407,6 +407,7 @@ var App = /*#__PURE__*/function (_React$Component) {
           return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_13__["default"], {
             key: column.id,
             column: column,
+            submitSession: _this2.submitSession,
             sessions: sessions,
             index: index,
             makeSession: _this2.makeSession
