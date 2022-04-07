@@ -204,14 +204,12 @@ var App = /*#__PURE__*/function (_React$Component) {
         }
       },
       addSession: false,
-      addedFrom: '',
       totalSessions: 5,
       columnOrder: ['column-1', 'column-2', 'column-3'],
       totalColumns: 3,
       addColumn: false,
       columnName: ''
-    }; //this.makeSession = this.makeSession.bind(this);
-
+    };
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.makeColumn = _this.makeColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -244,9 +242,9 @@ var App = /*#__PURE__*/function (_React$Component) {
 
   }, {
     key: "submitSession",
-    value: function submitSession(e, text) {
+    value: function submitSession(e, addedFrom, text) {
       e.preventDefault();
-      console.log('submitSession triggered');
+      console.log('added from: ', addedFrom);
       var newId = "session-".concat(this.state.totalSessions);
       var newSession = {
         id: newId,
@@ -510,7 +508,8 @@ var Column = /*#__PURE__*/function (_React$Component) {
     _this = _super.call(this, props);
     _this.state = {
       addSession: false,
-      sessionText: ''
+      sessionText: '',
+      addedFrom: ''
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     _this.handleChange = _this.handleChange.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
@@ -519,11 +518,11 @@ var Column = /*#__PURE__*/function (_React$Component) {
 
   _babel_runtime_helpers_createClass__WEBPACK_IMPORTED_MODULE_2___default()(Column, [{
     key: "makeSession",
-    value: function makeSession(e, id) {
-      console.log('make sesh');
+    value: function makeSession(id) {
       console.log(id);
       this.setState({
-        addSession: true
+        addSession: true,
+        addedFrom: id
       });
     }
   }, {
@@ -559,7 +558,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
           }), provided.placeholder);
         }), _this2.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("form", {
           onSubmit: function onSubmit(e) {
-            return _this2.props.submitSession(e, _this2.state.sessionText);
+            return _this2.props.submitSession(e, _this2.state.addedFrom, _this2.state.sessionText);
           }
         }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(TextBox, {
           rows: "3",
@@ -570,8 +569,8 @@ var Column = /*#__PURE__*/function (_React$Component) {
           type: "submit",
           value: "Submit"
         })) : '', /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
-          onClick: function onClick(e) {
-            return _this2.makeSession(e, _this2.props.column.id);
+          onClick: function onClick() {
+            return _this2.makeSession(_this2.props.column.id);
           }
         }, " + Add a Card "));
       });

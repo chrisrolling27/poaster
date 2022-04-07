@@ -37,7 +37,8 @@ export default class Column extends React.Component {
 
     this.state = {
       addSession: false,
-      sessionText: ''
+      sessionText: '',
+      addedFrom: ''
     };
 
     this.makeSession = this.makeSession.bind(this);
@@ -45,10 +46,9 @@ export default class Column extends React.Component {
 
   }
 
-  makeSession(e, id) {
-    console.log('make sesh');
+  makeSession(id) {
     console.log(id);
-    this.setState({ addSession: true });
+    this.setState({ addSession: true, addedFrom: id });
   }
 
   handleChange(e) {
@@ -79,15 +79,14 @@ export default class Column extends React.Component {
               )}
             </Droppable>
 
-
             {this.state.addSession ?
-              <form onSubmit={(e) => this.props.submitSession(e, this.state.sessionText)}>
+              <form onSubmit={(e) => this.props.submitSession(e, this.state.addedFrom, this.state.sessionText)}>
                 <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : ''}
 
-            <button onClick={(e) => this.makeSession(e, this.props.column.id)}> + Add a Card </button>
+            <button onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </button>
 
           </Container>
         )}

@@ -50,7 +50,6 @@ export default class App extends React.Component {
       },
 
       addSession: false,
-      addedFrom: '',
       totalSessions: 5,
       columnOrder: ['column-1', 'column-2', 'column-3'],
       totalColumns: 3,
@@ -59,7 +58,6 @@ export default class App extends React.Component {
 
     };
 
-    //this.makeSession = this.makeSession.bind(this);
     this.submitSession = this.submitSession.bind(this);
     this.onDragEnd = this.onDragEnd.bind(this);
     this.makeColumn = this.makeColumn.bind(this);
@@ -90,10 +88,11 @@ export default class App extends React.Component {
   // }
 
 
-  submitSession(e, text) {
+  submitSession(e, addedFrom, text) {
     e.preventDefault();
-    console.log('submitSession triggered');
-    
+
+    console.log('added from: ', addedFrom);
+
     let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
 
