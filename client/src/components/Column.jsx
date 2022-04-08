@@ -26,7 +26,7 @@ const SessionList = styled.div`
   background-color: lightskyblue;
 `;
 
-const TextBox = styled.input`
+const TextBox = styled.textarea`
   border: 1px solid lightgrey;
   margin-left: 5px;
 `;
@@ -84,15 +84,15 @@ export default class Column extends React.Component {
                 </SessionList>
               )}
             </Droppable>
-
+            
             {this.state.addSession ?
               <form onSubmit={(e) => this.submitClear(e, this.state.addedFrom, this.state.sessionText) }>
-                <TextBox rows="2" cols="5" name="sessiontext" required onChange={this.handleChange}>
+                <TextBox name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
-              </form> : ''}
+              </form> : <button onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </button>}
 
-            <button onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </button>
+            
 
           </Container>
         )}
