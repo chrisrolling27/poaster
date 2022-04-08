@@ -79,7 +79,7 @@ export default class Column extends React.Component {
 
             {this.state.addSession ?
               <form onSubmit={(e) => this.props.submitSession(e, this.state.addedFrom, this.state.sessionText)}>
-                <TextBox rows="1" cols="18" name="sessiontext" onChange={this.handleChange}>
+                <TextBox rows="1" cols="18" name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : ''}

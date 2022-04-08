@@ -267,7 +267,7 @@ export default class App extends React.Component {
             <form onSubmit={(e) => this.submitColumn(e)}>
               <label> Title: </label>
               <input type="text" onChange={this.handleChange} />
-              <input type="submit" value="Submit" />
+              <input type="submit" value="Submit"  />
             </form> </FormContainer>
           : ''}
 

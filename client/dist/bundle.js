@@ -556,6 +556,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
           rows: "1",
           cols: "18",
           name: "sessiontext",
+          required: true,
           onChange: _this2.handleChange
         }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("input", {
           type: "submit",
