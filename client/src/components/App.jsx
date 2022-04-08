@@ -47,11 +47,11 @@ export default class App extends React.Component {
         },
       },
 
-      addSession: false,
-      totalSessions: 5,
       columnOrder: ['column-1', 'column-2', 'column-3'],
-      totalColumns: 3,
+      addSession: false,
       addColumn: false,
+      totalSessions: 5,
+      totalColumns: 3,
       columnName: '',
 
     };
@@ -251,7 +251,13 @@ export default class App extends React.Component {
                 {this.state.columnOrder.map((columnId, index) => {
                   const column = this.state.columns[columnId];
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
-                  return <Column key={column.id} column={column} submitSession={this.submitSession} sessions={sessions} index={index} makeSession={this.makeSession} />;
+                  return <Column 
+                  key={column.id} 
+                  column={column} 
+                  submitSession={this.submitSession} 
+                  sessions={sessions}
+                  index={index} 
+                   />;
                 })}
                 {provided.placeholder}
               </Container>

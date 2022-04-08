@@ -11,16 +11,19 @@ const Container = styled.div`
   width: 220px;
   display: flex;
   flex-direction: column;
-  background-color: white;
+  background-color: lightskyblue;
 `;
 const Title = styled.h3`
   paddings: 8px;
   border: 1px solid lightgrey;
+  background-color: moccasin;
+  text-align: center;
 `;
 const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
   flex-grow: 1;
+  background-color: lightskyblue;
 `;
 
 const TextBox = styled.textarea`
