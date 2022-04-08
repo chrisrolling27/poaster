@@ -72,9 +72,9 @@ export default class App extends React.Component {
         snapshot.docs.forEach((doc) => {
           posts.push({ ...doc.data(), id: doc.id })
         })
-        console.log(posts);
+        //console.log(posts);
         for (let i = 0; i < posts.length; i++) {
-          console.log(posts[i].content);
+          //console.log(posts[i].content);
         }
       })
       .catch(err => {
@@ -82,10 +82,11 @@ export default class App extends React.Component {
       })
   }
 
+//what lives in App and gets passed down as props?
+// totalSessions, 
 
-  submitSession(e, addedFrom, text) {
-    e.preventDefault();
-
+  submitSession(addedFrom, text) {
+    
     let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
 

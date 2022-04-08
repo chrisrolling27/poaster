@@ -26,7 +26,7 @@ const SessionList = styled.div`
   background-color: lightskyblue;
 `;
 
-const TextBox = styled.textarea`
+const TextBox = styled.input`
   border: 1px solid lightgrey;
   margin-left: 5px;
 `;
@@ -45,7 +45,7 @@ export default class Column extends React.Component {
 
     this.makeSession = this.makeSession.bind(this);
     this.handleChange = this.handleChange.bind(this);
-
+    this.submitClear = this.submitClear.bind(this);
   }
 
   makeSession(id) {
@@ -56,6 +56,11 @@ export default class Column extends React.Component {
     this.setState({ sessionText: e.target.value })
   }
 
+  submitClear(e, addedFrom, sessionText) {
+    e.preventDefault();
+    this.props.submitSession(addedFrom, sessionText);
+    this.setState({ addSession: false });
+  }
 
   render() {
     return (
@@ -81,8 +86,8 @@ export default class Column extends React.Component {
             </Droppable>
 
             {this.state.addSession ?
-              <form onSubmit={(e) => this.props.submitSession(e, this.state.addedFrom, this.state.sessionText)}>
-                <TextBox rows="2" cols="20" name="sessiontext" required onChange={this.handleChange}>
+              <form onSubmit={(e) => this.submitClear(e, this.state.addedFrom, this.state.sessionText) }>
+                <TextBox rows="2" cols="5" name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : ''}
@@ -95,3 +100,4 @@ export default class Column extends React.Component {
     );
   }
 }
+

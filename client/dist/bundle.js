@@ -223,20 +223,19 @@ var App = /*#__PURE__*/function (_React$Component) {
           posts.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
             id: doc.id
           }));
-        });
-        console.log(posts);
+        }); //console.log(posts);
 
-        for (var i = 0; i < posts.length; i++) {
-          console.log(posts[i].content);
+        for (var i = 0; i < posts.length; i++) {//console.log(posts[i].content);
         }
       })["catch"](function (err) {
         console.log(err.message);
       });
-    }
+    } //what lives in App and gets passed down as props?
+    // totalSessions, 
+
   }, {
     key: "submitSession",
-    value: function submitSession(e, addedFrom, text) {
-      e.preventDefault();
+    value: function submitSession(addedFrom, text) {
       var newId = "session-".concat(this.state.totalSessions);
       var newSession = {
         id: newId,
@@ -482,7 +481,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  background-color: moccasin;\n  text-align: center;\n"])));
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: lightskyblue;\n"])));
-var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].textarea(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n"])));
+var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_4___default()(Column, _React$Component);
@@ -502,6 +501,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
     };
     _this.makeSession = _this.makeSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     _this.handleChange = _this.handleChange.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
+    _this.submitClear = _this.submitClear.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_3___default()(_this));
     return _this;
   }
 
@@ -518,6 +518,15 @@ var Column = /*#__PURE__*/function (_React$Component) {
     value: function handleChange(e) {
       this.setState({
         sessionText: e.target.value
+      });
+    }
+  }, {
+    key: "submitClear",
+    value: function submitClear(e, addedFrom, sessionText) {
+      e.preventDefault();
+      this.props.submitSession(addedFrom, sessionText);
+      this.setState({
+        addSession: false
       });
     }
   }, {
@@ -546,11 +555,11 @@ var Column = /*#__PURE__*/function (_React$Component) {
           }), provided.placeholder);
         }), _this2.state.addSession ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("form", {
           onSubmit: function onSubmit(e) {
-            return _this2.props.submitSession(e, _this2.state.addedFrom, _this2.state.sessionText);
+            return _this2.submitClear(e, _this2.state.addedFrom, _this2.state.sessionText);
           }
         }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(TextBox, {
           rows: "2",
-          cols: "20",
+          cols: "5",
           name: "sessiontext",
           required: true,
           onChange: _this2.handleChange
