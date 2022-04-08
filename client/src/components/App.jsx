@@ -53,7 +53,7 @@ export default class App extends React.Component {
       totalSessions: 5,
       totalColumns: 3,
       columnName: '',
-      count: 42
+
 
     };
 
@@ -254,7 +254,6 @@ export default class App extends React.Component {
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
                   return <Column 
                   key={column.id} 
-                  count={this.state.count}
                   column={column} 
                   submitSession={this.submitSession} 
                   sessions={sessions}

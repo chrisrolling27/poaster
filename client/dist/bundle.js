@@ -204,8 +204,7 @@ var App = /*#__PURE__*/function (_React$Component) {
       addColumn: false,
       totalSessions: 5,
       totalColumns: 3,
-      columnName: '',
-      count: 42
+      columnName: ''
     };
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.makeColumn = _this.makeColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -397,7 +396,6 @@ var App = /*#__PURE__*/function (_React$Component) {
           });
           return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
             key: column.id,
-            count: _this2.state.count,
             column: column,
             submitSession: _this2.submitSession,
             sessions: sessions,
@@ -533,7 +531,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, {
           ref: provided.innerRef
-        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Title, provided.dragHandleProps, _this2.props.column.title, _this2.props.count), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
+        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Title, provided.dragHandleProps, _this2.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
           droppableId: _this2.props.column.id,
           type: "session"
         }, function (provided) {

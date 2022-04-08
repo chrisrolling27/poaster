@@ -65,7 +65,6 @@ export default class Column extends React.Component {
             ref={provided.innerRef}>
             <Title {...provided.dragHandleProps}>
               {this.props.column.title}
-              {this.props.count}
             </Title>
             <Droppable droppableId={this.props.column.id} type="session">
               {provided => (
