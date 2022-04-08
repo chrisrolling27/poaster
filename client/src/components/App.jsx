@@ -257,6 +257,7 @@ export default class App extends React.Component {
                   submitSession={this.submitSession} 
                   sessions={sessions}
                   index={index} 
+                  
                    />;
                 })}
                 {provided.placeholder}
@@ -265,8 +266,7 @@ export default class App extends React.Component {
           </Droppable>
         </DragDropContext>
 
-        {/* {this.state.addSession ? <SessionAdder submitSession={this.submitSession}> </SessionAdder> : ''} */}
-
+        {/* ADDS COLUMS  */}
         <button onClick={this.makeColumn}>+ Column</button>
         {this.state.addColumn ?
           <FormContainer>

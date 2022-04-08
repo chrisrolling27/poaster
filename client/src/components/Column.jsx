@@ -5,7 +5,7 @@ import { Droppable, Draggable } from 'react-beautiful-dnd';
 
 const Container = styled.div`
   margin: 8px;
-  border: 1px solid lightgrey;
+  border: 1px;
   border-radius: 2px;
   margin-bottom: 8px;
   width: 220px;
@@ -15,7 +15,7 @@ const Container = styled.div`
 `;
 const Title = styled.h3`
   paddings: 8px;
-  border: 1px solid lightgrey;
+  border: 1px;
   background-color: moccasin;
   text-align: center;
 `;
