@@ -1,7 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
 import SessionCard from './SessionCard.jsx';
-import SessionAdder from './SessionAdder.jsx';
 import { Droppable, Draggable } from 'react-beautiful-dnd';
 
 const Container = styled.div`
@@ -47,7 +46,6 @@ export default class Column extends React.Component {
   }
 
   makeSession(id) {
-    console.log(id);
     this.setState({ addSession: true, addedFrom: id });
   }
 
@@ -81,7 +79,7 @@ export default class Column extends React.Component {
 
             {this.state.addSession ?
               <form onSubmit={(e) => this.props.submitSession(e, this.state.addedFrom, this.state.sessionText)}>
-                <TextBox rows="3" cols="15" name="sessiontext" onChange={this.handleChange}>
+                <TextBox rows="1" cols="18" name="sessiontext" onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : ''}

@@ -1,7 +1,5 @@
 import React from 'react'
 import styled from 'styled-components';
-import SessionAdder from './SessionAdder.jsx';
-import SessionCard from './SessionCard.jsx';
 import Column from './Column.jsx';
 import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
@@ -14,7 +12,7 @@ display: flex;
 
 const FormContainer = styled.div`
   paddings: 8px;
-  background-color: orange;
+  
 `;
 
 export default class App extends React.Component {
