@@ -26,9 +26,10 @@ const SessionList = styled.div`
   background-color: lightskyblue;
 `;
 
-const TextBox = styled.textarea`
+const TextBox = styled.input`
   border: 1px solid lightgrey;
   margin-left: 5px;
+  margin-bottom: 5px;
 `;
 
 
@@ -91,8 +92,6 @@ export default class Column extends React.Component {
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : <button onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </button>}
-
-            
 
           </Container>
         )}

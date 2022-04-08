@@ -147,7 +147,6 @@ export default class App extends React.Component {
     let updatedColumns = this.state.columns;
     updatedColumns[newId] = newColumn;
 
-    //Not sure why columns update without updatedColumnOrder state update
     let updatedColumnOrder = this.state.columnOrder;
     updatedColumnOrder.push(newId);
 
@@ -273,8 +272,8 @@ export default class App extends React.Component {
         {this.state.addColumn ?
           <FormContainer>
             <form onSubmit={(e) => this.submitColumn(e)}>
-              <label> Title: </label>
-              <input type="text" onChange={this.handleChange} />
+              {/* <label> Title: </label> */}
+              <input type="text" onChange={this.handleChange} required />
               <input type="submit" value="Submit"  />
             </form> </FormContainer>
           : ''}

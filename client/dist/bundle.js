@@ -294,8 +294,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         sessionIds: []
       };
       var updatedColumns = this.state.columns;
-      updatedColumns[newId] = newColumn; //Not sure why columns update without updatedColumnOrder state update
-
+      updatedColumns[newId] = newColumn;
       var updatedColumnOrder = this.state.columnOrder;
       updatedColumnOrder.push(newId);
       this.setState({
@@ -407,9 +406,10 @@ var App = /*#__PURE__*/function (_React$Component) {
         onSubmit: function onSubmit(e) {
           return _this2.submitColumn(e);
         }
-      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("label", null, " Title: "), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
+      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
         type: "text",
-        onChange: this.handleChange
+        onChange: this.handleChange,
+        required: true
       }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
         type: "submit",
         value: "Submit"
@@ -481,7 +481,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  background-color: moccasin;\n  text-align: center;\n"])));
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: lightskyblue;\n"])));
-var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].textarea(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n"])));
+var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n  margin-bottom: 5px;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_4___default()(Column, _React$Component);
