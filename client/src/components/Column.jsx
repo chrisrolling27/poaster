@@ -65,6 +65,7 @@ export default class Column extends React.Component {
             ref={provided.innerRef}>
             <Title {...provided.dragHandleProps}>
               {this.props.column.title}
+              {this.props.count}
             </Title>
             <Droppable droppableId={this.props.column.id} type="session">
               {provided => (
@@ -82,7 +83,7 @@ export default class Column extends React.Component {
 
             {this.state.addSession ?
               <form onSubmit={(e) => this.props.submitSession(e, this.state.addedFrom, this.state.sessionText)}>
-                <TextBox rows="1" cols="18" name="sessiontext" required onChange={this.handleChange}>
+                <TextBox rows="2" cols="20" name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
                 <input type="submit" value="Submit" />
               </form> : ''}

@@ -53,13 +53,14 @@ export default class App extends React.Component {
       totalSessions: 5,
       totalColumns: 3,
       columnName: '',
+      count: 42
 
     };
 
     this.submitSession = this.submitSession.bind(this);
-    this.onDragEnd = this.onDragEnd.bind(this);
     this.makeColumn = this.makeColumn.bind(this);
     this.submitColumn = this.submitColumn.bind(this);
+    this.onDragEnd = this.onDragEnd.bind(this);
     this.handleChange = this.handleChange.bind(this);
   }
 
@@ -80,10 +81,6 @@ export default class App extends React.Component {
         console.log(err.message);
       })
   }
-
-  // makeSession(e, id) {
-  //   this.setState({ addSession: !this.state.addSession, addedFrom: id });
-  // }
 
 
   submitSession(e, addedFrom, text) {
@@ -119,6 +116,7 @@ export default class App extends React.Component {
     this.setState(newState);
   }
 
+
   //console.log(this.state.sessions.fromy.content)
   //console.log(this.state);
   //this works and does in fact add state.
@@ -127,6 +125,7 @@ export default class App extends React.Component {
   //   console.log('added state?')
   // })
   ////
+
 
 
   makeColumn(e) {
@@ -153,6 +152,7 @@ export default class App extends React.Component {
 
     this.setState({ addColumn: false, totalColumns: incrementCol });
   }
+
 
 
   onDragEnd(result) {
@@ -234,6 +234,7 @@ export default class App extends React.Component {
 
   };
 
+
   render() {
     return (
       <div>
@@ -253,6 +254,7 @@ export default class App extends React.Component {
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
                   return <Column 
                   key={column.id} 
+                  count={this.state.count}
                   column={column} 
                   submitSession={this.submitSession} 
                   sessions={sessions}

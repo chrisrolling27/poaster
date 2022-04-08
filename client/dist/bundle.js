@@ -204,12 +204,13 @@ var App = /*#__PURE__*/function (_React$Component) {
       addColumn: false,
       totalSessions: 5,
       totalColumns: 3,
-      columnName: ''
+      columnName: '',
+      count: 42
     };
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
-    _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.makeColumn = _this.makeColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.submitColumn = _this.submitColumn.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
+    _this.onDragEnd = _this.onDragEnd.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     _this.handleChange = _this.handleChange.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
     return _this;
   }
@@ -232,10 +233,7 @@ var App = /*#__PURE__*/function (_React$Component) {
       })["catch"](function (err) {
         console.log(err.message);
       });
-    } // makeSession(e, id) {
-    //   this.setState({ addSession: !this.state.addSession, addedFrom: id });
-    // }
-
+    }
   }, {
     key: "submitSession",
     value: function submitSession(e, addedFrom, text) {
@@ -399,6 +397,7 @@ var App = /*#__PURE__*/function (_React$Component) {
           });
           return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
             key: column.id,
+            count: _this2.state.count,
             column: column,
             submitSession: _this2.submitSession,
             sessions: sessions,
@@ -534,7 +533,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, {
           ref: provided.innerRef
-        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Title, provided.dragHandleProps, _this2.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
+        }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Title, provided.dragHandleProps, _this2.props.column.title, _this2.props.count), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
           droppableId: _this2.props.column.id,
           type: "session"
         }, function (provided) {
@@ -552,8 +551,8 @@ var Column = /*#__PURE__*/function (_React$Component) {
             return _this2.props.submitSession(e, _this2.state.addedFrom, _this2.state.sessionText);
           }
         }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(TextBox, {
-          rows: "1",
-          cols: "18",
+          rows: "2",
+          cols: "20",
           name: "sessiontext",
           required: true,
           onChange: _this2.handleChange
