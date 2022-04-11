@@ -283,7 +283,6 @@ export default class App extends React.Component {
   }
 }
 
-
 //DB SETUP
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
