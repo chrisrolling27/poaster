@@ -480,7 +480,9 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 220px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  background-color: moccasin;\n  text-align: center;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: lightskyblue;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: ", ";\n"])), function (props) {
+  return props.isDraggingOver ? 'red' : 'lightskyblue';
+});
 var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n  margin-bottom: 5px;\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
@@ -543,10 +545,12 @@ var Column = /*#__PURE__*/function (_React$Component) {
         }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(Title, provided.dragHandleProps, _this2.props.column.title), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_11__["Droppable"], {
           droppableId: _this2.props.column.id,
           type: "session"
-        }, function (provided) {
+        }, function (provided, snapshot) {
           return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(SessionList, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({
             ref: provided.innerRef
-          }, provided.droppableProps), _this2.props.sessions.map(function (session, index) {
+          }, provided.droppableProps, {
+            isDraggingOver: snapshot.isDraggingOver
+          }), _this2.props.sessions.map(function (session, index) {
             return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(_SessionCard_jsx__WEBPACK_IMPORTED_MODULE_10__["default"], {
               key: session.id,
               session: session,
@@ -605,15 +609,18 @@ var _templateObject;
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n"])));
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  background-color: ", ";\n"])), function (props) {
+  return props.isDragging ? 'lightgreen' : 'white';
+});
 
 var SessionCard = function SessionCard(props) {
   return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_3__["Draggable"], {
     draggableId: props.session.id,
     index: props.index
-  }, function (provided) {
+  }, function (provided, snapshot) {
     return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_2___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.draggableProps, provided.dragHandleProps, {
-      ref: provided.innerRef
+      ref: provided.innerRef,
+      isDragging: snapshot.isDragging
     }), props.session.content);
   });
 };

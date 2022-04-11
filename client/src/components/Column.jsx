@@ -23,7 +23,7 @@ const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
   flex-grow: 1;
-  background-color: lightskyblue;
+  background-color: ${props => (props.isDraggingOver ? 'red' : 'lightskyblue')};
 `;
 
 const TextBox = styled.input`
@@ -73,10 +73,11 @@ export default class Column extends React.Component {
               {this.props.column.title}
             </Title>
             <Droppable droppableId={this.props.column.id} type="session">
-              {provided => (
+              {(provided, snapshot) => (
                 <SessionList
                   ref={provided.innerRef}
                   {...provided.droppableProps}
+                  isDraggingOver={snapshot.isDraggingOver}
                 >
                   {this.props.sessions.map((session, index) => (
                     <SessionCard key={session.id} session={session} index={index} />

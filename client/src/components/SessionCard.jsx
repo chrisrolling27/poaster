@@ -8,17 +8,19 @@ const Container = styled.div`
   border-radius: 2px;
   margin-bottom: 8px;
   background-color: white;
+  background-color: ${props => (props.isDragging ? 'lightgreen' : 'white')};
 `;
 
  const SessionCard = (props) => {
 
     return (
       <Draggable draggableId={props.session.id} index={props.index}>
-        {provided => (
+        {(provided, snapshot) => (
           <Container
             {...provided.draggableProps}
             {...provided.dragHandleProps}
             ref={provided.innerRef}
+            isDragging={snapshot.isDragging}
           >
             {props.session.content}
           </Container>
