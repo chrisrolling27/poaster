@@ -4,7 +4,7 @@ import Column from './Column.jsx';
 import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, getDocs, addDoc } from 'firebase/firestore';
+import { getFirestore, collection, getDocs, addDoc, Timestamp } from 'firebase/firestore';
 
 const Container = styled.div`
 display: flex;
@@ -238,7 +238,11 @@ export default class App extends React.Component {
   render() {
     return (
       <div>
-        <DragDropContext onDragEnd={this.onDragEnd}>
+        <DragDropContext 
+        onDragStart={this.onDragStart}
+        onDragEnd={this.onDragEnd}
+        onDragUpdate={this.onDragUpdate}
+        >
           <Droppable
             droppableId="all-columns"
             direction="horizontal"
