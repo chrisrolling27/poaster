@@ -281,7 +281,6 @@ export default class App extends React.Component {
               <input type="submit" value="Submit"  />
             </form> </FormContainer>
           : ''}
-
       </div>
     );
   }
