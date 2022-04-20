@@ -82,9 +82,6 @@ export default class App extends React.Component {
       })
   }
 
-//what lives in App and gets passed down as props?
-// totalSessions, 
-
   submitSession(addedFrom, text) {
     
     let newId = `session-${this.state.totalSessions}`;

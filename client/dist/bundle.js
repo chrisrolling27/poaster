@@ -230,9 +230,7 @@ var App = /*#__PURE__*/function (_React$Component) {
       })["catch"](function (err) {
         console.log(err.message);
       });
-    } //what lives in App and gets passed down as props?
-    // totalSessions, 
-
+    }
   }, {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
@@ -483,7 +481,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 500px;\n  height: 700px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
 var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  background-color: moccasin;\n  text-align: center;\n"])));
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: ", ";\n"])), function (props) {
-  return props.isDraggingOver ? 'red' : 'lightskyblue';
+  return props.isDraggingOver ? 'SkyBlue' : 'lightskyblue';
 });
 var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n  margin-bottom: 5px;\n"])));
 

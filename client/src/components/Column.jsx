@@ -24,7 +24,7 @@ const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
   flex-grow: 1;
-  background-color: ${props => (props.isDraggingOver ? 'yellow' : 'lightskyblue')};
+  background-color: ${props => (props.isDraggingOver ? 'SkyBlue' : 'lightskyblue')};
 `;
 
 const TextBox = styled.input`
