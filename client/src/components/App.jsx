@@ -285,5 +285,7 @@ export default class App extends React.Component {
 
 //DB SETUP
 const app = initializeApp(firebaseConfig);
+const analytics = getAnalytics(app);
 const db = getFirestore(app);
 const colRef = collection(db, 'posts');
+

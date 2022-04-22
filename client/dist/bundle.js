@@ -423,6 +423,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
+var analytics = getAnalytics(app);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
 var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'posts');
 
@@ -645,13 +646,13 @@ __webpack_require__.r(__webpack_exports__);
 // Your web app's Firebase configuration
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 var firebaseConfig = {
-  apiKey: "AIzaSyCiR-Bb_WXw8UPR6WeprTgaI-VBf_ZbAKs",
-  authDomain: "poasty-d8c86.firebaseapp.com",
-  projectId: "poasty-d8c86",
-  storageBucket: "poasty-d8c86.appspot.com",
-  messagingSenderId: "348683877802",
-  appId: "1:348683877802:web:de286d28c17df46f483fd3",
-  measurementId: "G-DE3EYY44YF"
+  apiKey: "AIzaSyBZOithYm4Rn9ZkT70NQGGDzIu1giqV7tc",
+  authDomain: "poaster-be8da.firebaseapp.com",
+  projectId: "poaster-be8da",
+  storageBucket: "poaster-be8da.appspot.com",
+  messagingSenderId: "490877761414",
+  appId: "1:490877761414:web:605e79a378fa20a7919e07",
+  measurementId: "G-LH2GEEBF7Z"
 };
 
 
