@@ -150,7 +150,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
-var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px;\n  \n"])));
+var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px; \n"])));
 
 var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_5___default()(App, _React$Component);
@@ -223,9 +223,11 @@ var App = /*#__PURE__*/function (_React$Component) {
           posts.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
             id: doc.id
           }));
-        }); //console.log(posts);
+        });
+        console.log(posts);
 
-        for (var i = 0; i < posts.length; i++) {//console.log(posts[i].content);
+        for (var i = 0; i < posts.length; i++) {
+          console.log(posts[i].content);
         }
       })["catch"](function (err) {
         console.log(err.message);
@@ -423,9 +425,8 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
-var analytics = getAnalytics(app);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
-var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'posts');
+var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
 
 /***/ }),
 

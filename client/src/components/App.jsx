@@ -11,8 +11,7 @@ display: flex;
 `;
 
 const FormContainer = styled.div`
-  paddings: 8px;
-  
+  paddings: 8px; 
 `;
 
 export default class App extends React.Component {
@@ -72,9 +71,9 @@ export default class App extends React.Component {
         snapshot.docs.forEach((doc) => {
           posts.push({ ...doc.data(), id: doc.id })
         })
-        //console.log(posts);
+        console.log(posts);
         for (let i = 0; i < posts.length; i++) {
-          //console.log(posts[i].content);
+          console.log(posts[i].content);
         }
       })
       .catch(err => {
@@ -285,7 +284,7 @@ export default class App extends React.Component {
 
 //DB SETUP
 const app = initializeApp(firebaseConfig);
-const analytics = getAnalytics(app);
 const db = getFirestore(app);
-const colRef = collection(db, 'posts');
+const colRef = collection(db, 'sessions');
+
 
