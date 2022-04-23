@@ -486,8 +486,8 @@ var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templa
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: ", ";\n"])), function (props) {
   return props.isDraggingOver ? 'SkyBlue' : 'lightskyblue';
 });
-var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n  margin-bottom: 5px;\n"])));
-var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject5 || (_templateObject5 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: red;\n\n"])));
+var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin-left: 5px;\n  margin-bottom: 5px;\n  background-color: #C8C8C8;\n"])));
+var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject5 || (_templateObject5 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: lightskyblue;\nborder: light;\ntext-align: left;\nborder: 1px solid lightskyblue;\n\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_4___default()(Column, _React$Component);
@@ -571,8 +571,8 @@ var Column = /*#__PURE__*/function (_React$Component) {
           onChange: _this2.handleChange
         }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("input", {
           type: "submit",
-          value: "Submit"
-        })) : /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("button", {
+          value: "Submit!!!"
+        })) : /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(AddCardButton, {
           onClick: function onClick() {
             return _this2.makeSession(_this2.props.column.id);
           }

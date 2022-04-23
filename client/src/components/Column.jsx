@@ -28,14 +28,17 @@ const SessionList = styled.div`
 `;
 
 const TextBox = styled.input`
-  border: 1px solid lightgrey;
   margin-left: 5px;
   margin-bottom: 5px;
+  background-color: #C8C8C8;
 `;
 
 const AddCardButton = styled.button`
 
-background-color: red;
+background-color: lightskyblue;
+border: light;
+text-align: left;
+border: 1px solid lightskyblue;
 
 `;
 
@@ -98,8 +101,8 @@ export default class Column extends React.Component {
               <form onSubmit={(e) => this.submitClear(e, this.state.addedFrom, this.state.sessionText) }>
                 <TextBox name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
-                <input type="submit" value="Submit" />
-              </form> : <button onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </button>}
+                <input type="submit" value="Submit!!!" />
+              </form> : <AddCardButton onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </AddCardButton>}
 
           </Container>
         )}
