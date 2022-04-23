@@ -33,6 +33,12 @@ const TextBox = styled.input`
   margin-bottom: 5px;
 `;
 
+const AddCardButton = styled.button`
+
+background-color: red;
+
+`;
+
 
 export default class Column extends React.Component {
 

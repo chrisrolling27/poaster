@@ -132,7 +132,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-var _templateObject, _templateObject2, _templateObject3, _templateObject4;
+var _templateObject, _templateObject2, _templateObject3;
 
 function ownKeys(object, enumerableOnly) { var keys = Object.keys(object); if (Object.getOwnPropertySymbols) { var symbols = Object.getOwnPropertySymbols(object); if (enumerableOnly) { symbols = symbols.filter(function (sym) { return Object.getOwnPropertyDescriptor(object, sym).enumerable; }); } keys.push.apply(keys, symbols); } return keys; }
 
@@ -151,8 +151,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
 var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px; \n"])));
-var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n\nbackground-color: red;\n\n"])));
-var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n\nbackground-color: white;\n\n"])));
+var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n\nbackground-color: white;\n\n"])));
 
 var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_5___default()(App, _React$Component);
@@ -472,7 +471,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-var _templateObject, _templateObject2, _templateObject3, _templateObject4;
+var _templateObject, _templateObject2, _templateObject3, _templateObject4, _templateObject5;
 
 function _createSuper(Derived) { var hasNativeReflectConstruct = _isNativeReflectConstruct(); return function _createSuperInternal() { var Super = _babel_runtime_helpers_getPrototypeOf__WEBPACK_IMPORTED_MODULE_6___default()(Derived), result; if (hasNativeReflectConstruct) { var NewTarget = _babel_runtime_helpers_getPrototypeOf__WEBPACK_IMPORTED_MODULE_6___default()(this).constructor; result = Reflect.construct(Super, arguments, NewTarget); } else { result = Super.apply(this, arguments); } return _babel_runtime_helpers_possibleConstructorReturn__WEBPACK_IMPORTED_MODULE_5___default()(this, result); }; }
 
@@ -488,6 +487,7 @@ var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(
   return props.isDraggingOver ? 'SkyBlue' : 'lightskyblue';
 });
 var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  border: 1px solid lightgrey;\n  margin-left: 5px;\n  margin-bottom: 5px;\n"])));
+var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject5 || (_templateObject5 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: red;\n\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_inherits__WEBPACK_IMPORTED_MODULE_4___default()(Column, _React$Component);

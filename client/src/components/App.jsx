@@ -14,11 +14,7 @@ const FormContainer = styled.div`
   paddings: 8px; 
 `;
 
-const AddCardButton = styled.button`
 
-background-color: red;
-
-`;
 
 const AddColumnButton = styled.button`
 
