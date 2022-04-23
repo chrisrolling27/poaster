@@ -14,6 +14,18 @@ const FormContainer = styled.div`
   paddings: 8px; 
 `;
 
+const AddCardButton = styled.button`
+
+background-color: red;
+
+`;
+
+const AddColumnButton = styled.button`
+
+background-color: white;
+
+`;
+
 export default class App extends React.Component {
 
   constructor(props) {
@@ -268,7 +280,7 @@ export default class App extends React.Component {
         </DragDropContext>
 
         {/* ADDS COLUMS  */}
-        <button onClick={this.makeColumn}>+ Column</button>
+        <AddColumnButton onClick={this.makeColumn}>+ Column</AddColumnButton>
         {this.state.addColumn ?
           <FormContainer>
             <form onSubmit={(e) => this.submitColumn(e)}>

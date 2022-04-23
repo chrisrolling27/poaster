@@ -4,6 +4,8 @@ import styled from 'styled-components';
 
 const Container = styled.div`
   margin: 8px;
+  text-align: center;
+  padding: 70px 0;
   border: 1px solid lightgrey;
   border-radius: 2px;
   margin-bottom: 8px;
