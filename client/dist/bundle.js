@@ -166,42 +166,9 @@ var App = /*#__PURE__*/function (_React$Component) {
 
     _this = _super.call(this, props);
     _this.state = {
-      sessions: {
-        'session-1': {
-          id: 'session-1',
-          content: 'Hello switcher'
-        },
-        'session-2': {
-          id: 'session-2',
-          content: 'Swiper no swiping'
-        },
-        'session-3': {
-          id: 'session-3',
-          content: 'Jezebel was innocent'
-        },
-        'session-4': {
-          id: 'session-4',
-          content: 'One more time with feeling'
-        }
-      },
-      columns: {
-        'column-1': {
-          id: 'column-1',
-          title: 'Ideas',
-          sessionIds: ['session-1', 'session-2', 'session-3']
-        },
-        'column-2': {
-          id: 'column-2',
-          title: 'Notes',
-          sessionIds: []
-        },
-        'column-3': {
-          id: 'column-3',
-          title: 'Suggestions',
-          sessionIds: ['session-4']
-        }
-      },
-      columnOrder: ['column-1', 'column-2', 'column-3'],
+      sessions: {},
+      columns: {},
+      columnOrder: [],
       addSession: false,
       addColumn: false,
       totalSessions: 5,
@@ -219,18 +186,38 @@ var App = /*#__PURE__*/function (_React$Component) {
   _babel_runtime_helpers_createClass__WEBPACK_IMPORTED_MODULE_3___default()(App, [{
     key: "componentDidMount",
     value: function componentDidMount() {
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRef).then(function (snapshot) {
+      var _this2 = this;
+
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefColumns).then(function (snapshot) {
+        var columns = [];
+        snapshot.docs.forEach(function (doc) {
+          columns.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
+            id: doc.id
+          }));
+        });
+        console.log(columns);
+        columns.forEach(function (column) {//console.log(column);
+        });
+
+        _this2.setState({
+          columns: columns
+        });
+      })["catch"](function (err) {
+        console.log(err.message);
+      });
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefPosts).then(function (snapshot) {
         var posts = [];
         snapshot.docs.forEach(function (doc) {
           posts.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
             id: doc.id
           }));
         });
-        console.log(posts);
+        posts.forEach(function (post) {//console.log(post);
+        });
 
-        for (var i = 0; i < posts.length; i++) {
-          console.log(posts[i].content);
-        }
+        _this2.setState({
+          sessions: posts
+        });
       })["catch"](function (err) {
         console.log(err.message);
       });
@@ -378,7 +365,7 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "render",
     value: function render() {
-      var _this2 = this;
+      var _this3 = this;
 
       return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__["DragDropContext"], {
         onDragStart: this.onDragStart,
@@ -391,15 +378,15 @@ var App = /*#__PURE__*/function (_React$Component) {
       }, function (provided) {
         return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(Container, _babel_runtime_helpers_extends__WEBPACK_IMPORTED_MODULE_0___default()({}, provided.droppableProps, {
           ref: provided.innerRef
-        }), _this2.state.columnOrder.map(function (columnId, index) {
-          var column = _this2.state.columns[columnId];
+        }), _this3.state.columnOrder.map(function (columnId, index) {
+          var column = _this3.state.columns[columnId];
           var sessions = column.sessionIds.map(function (sessionId) {
-            return _this2.state.sessions[sessionId];
+            return _this3.state.sessions[sessionId];
           });
           return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(_Column_jsx__WEBPACK_IMPORTED_MODULE_11__["default"], {
             key: column.id,
             column: column,
-            submitSession: _this2.submitSession,
+            submitSession: _this3.submitSession,
             sessions: sessions,
             index: index
           });
@@ -408,7 +395,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         onClick: this.makeColumn
       }, "+ Column"), this.state.addColumn ? /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(FormContainer, null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("form", {
         onSubmit: function onSubmit(e) {
-          return _this2.submitColumn(e);
+          return _this3.submitColumn(e);
         }
       }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("input", {
         type: "text",
@@ -428,7 +415,8 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
-var colRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
+var colRefPosts = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
+var colRefColumns = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'columns');
 
 /***/ }),
 

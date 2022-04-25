@@ -36,31 +36,14 @@ export default class App extends React.Component {
     this.state = {
 
       sessions: {
-        'session-1': { id: 'session-1', content: 'Hello switcher' },
-        'session-2': { id: 'session-2', content: 'Swiper no swiping' },
-        'session-3': { id: 'session-3', content: 'Jezebel was innocent' },
-        'session-4': { id: 'session-4', content: 'One more time with feeling' },
+       
       },
 
       columns: {
-        'column-1': {
-          id: 'column-1',
-          title: 'Ideas',
-          sessionIds: ['session-1', 'session-2', 'session-3'],
-        },
-        'column-2': {
-          id: 'column-2',
-          title: 'Notes',
-          sessionIds: [],
-        },
-        'column-3': {
-          id: 'column-3',
-          title: 'Suggestions',
-          sessionIds: ['session-4'],
-        },
+        
       },
 
-      columnOrder: ['column-1', 'column-2', 'column-3'],
+      columnOrder: [],
       addSession: false,
       addColumn: false,
       totalSessions: 5,
@@ -79,20 +62,38 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
-    getDocs(colRef)
+    getDocs(colRefColumns)
+    .then((snapshot) => {
+      let columns = [];
+      snapshot.docs.forEach((doc) => {
+        columns.push({ ...doc.data(), id: doc.id })
+      })
+      console.log(columns);
+      columns.forEach((column) => {
+        //console.log(column);
+      })
+      this.setState({columns: columns})
+    })
+    .catch(err => {
+      console.log(err.message);
+    })
+
+    getDocs(colRefPosts)
       .then((snapshot) => {
         let posts = [];
         snapshot.docs.forEach((doc) => {
           posts.push({ ...doc.data(), id: doc.id })
         })
-        console.log(posts);
-        for (let i = 0; i < posts.length; i++) {
-          console.log(posts[i].content);
-        }
+        posts.forEach((post) => {
+          //console.log(post);
+        })
+        this.setState({sessions: posts})
       })
       .catch(err => {
         console.log(err.message);
       })
+
+
   }
 
   submitSession(addedFrom, text) {
@@ -299,6 +300,8 @@ export default class App extends React.Component {
 //DB SETUP
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const colRef = collection(db, 'sessions');
+
+const colRefPosts = collection(db, 'sessions');
+const colRefColumns = collection(db, 'columns');
 
 
