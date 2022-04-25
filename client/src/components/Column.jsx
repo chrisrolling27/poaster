@@ -111,7 +111,7 @@ export default class Column extends React.Component {
                 <TextBox name="sessiontext" required onChange={this.handleChange}>
                 </TextBox>
               
-                <input type="submit" value="Submit" />
+                <input type="submit" value="Submit!" />
               </form> : <AddCardButton onClick={() => this.makeSession(this.props.column.id)}> + Add a Card </AddCardButton>}
 
           </Container>

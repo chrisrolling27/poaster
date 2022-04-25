@@ -15,12 +15,18 @@ const FormContainer = styled.div`
 `;
 
 
-
 const AddColumnButton = styled.button`
 
-background-color: white;
+background-color: red;
 
 `;
+
+const AddForm = styled.form`
+
+background-color: green;
+value: please;
+`;
+
 
 export default class App extends React.Component {
 
