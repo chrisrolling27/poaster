@@ -36,20 +36,34 @@ export default class App extends React.Component {
     this.state = {
 
       sessions: {
-       
+
       },
 
       columns: {
-        
+        'column-1': {
+          id: 'column-1',
+          title: 'Ideas',
+          sessionIds: [],
+        },
+        'column-2': {
+          id: 'column-2',
+          title: 'Notes',
+          sessionIds: [],
+        },
+        'column-3': {
+          id: 'column-3',
+          title: 'Suggestions',
+          sessionIds: [],
+        },
+
       },
 
-      columnOrder: [],
+      columnOrder: ["column-1", "column-2", "column-3"],
       addSession: false,
       addColumn: false,
       totalSessions: 5,
       totalColumns: 3,
       columnName: '',
-
 
     };
 
@@ -62,32 +76,72 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
-    getDocs(colRefColumns)
-    .then((snapshot) => {
-      let columns = [];
-      snapshot.docs.forEach((doc) => {
-        columns.push({ ...doc.data(), id: doc.id })
-      })
-      console.log(columns);
-      columns.forEach((column) => {
-        //console.log(column);
-      })
-      this.setState({columns: columns})
-    })
-    .catch(err => {
-      console.log(err.message);
-    })
+    // getDocs(colRefColumns)
+    // .then((snapshot) => {
+    //   let columns = [];
+    //   let newColumnOrder = [];
 
-    getDocs(colRefPosts)
+    //   snapshot.docs.forEach((doc) => {
+    //     columns.push({ ...doc.data(), id: doc.id })
+    //     newColumnOrder.push(doc.id)
+    //   })
+
+    //   //console.log(columns);
+    //   //console.log(newColumnOrder);
+    //   columns.forEach((column) => {
+    //     console.log(column);
+    //   })
+
+    //   this.setState({columns: columns })
+    // })
+    // .catch(err => {
+    //   console.log(err.message);
+    // })
+
+
+    getDocs(colRefSessions)
       .then((snapshot) => {
-        let posts = [];
+        let sessions = {};
+
+        let revcolumns = {
+          'column-1': {
+            id: 'column-1',
+              title: 'Ideas',
+                sessionIds: ["session-1", "session-2", "session-3"],
+          },
+          'column-2': {
+            id: 'column-2',
+              title: 'Notes',
+                sessionIds: [],
+          },
+          'column-3': {
+            id: 'column-3',
+              title: 'Suggestions',
+                sessionIds: [],
+          }
+
+        };
+
         snapshot.docs.forEach((doc) => {
-          posts.push({ ...doc.data(), id: doc.id })
+
+          sessions[doc.id] = { ...doc.data() };
+          //sessions.push({ ...doc.data(), id: doc.id })
+
         })
-        posts.forEach((post) => {
-          //console.log(post);
-        })
-        this.setState({sessions: posts})
+
+        console.log(sessions);
+        // sessions.forEach((post) => {
+        //   console.log(post);
+        // })
+        //map to column sessions?
+
+        
+
+        console.log(revcolumns);
+
+
+        this.setState({ sessions: sessions, columns:revcolumns })
+
       })
       .catch(err => {
         console.log(err.message);
@@ -97,7 +151,7 @@ export default class App extends React.Component {
   }
 
   submitSession(addedFrom, text) {
-    
+
     let newId = `session-${this.state.totalSessions}`;
     let newSession = { id: newId, content: text };
 
@@ -167,20 +221,16 @@ export default class App extends React.Component {
 
 
   onDragEnd(result) {
-
     const { destination, source, draggableId, type } = result;
-
     if (!destination) {
       return;
     }
-
     if (
       destination.droppableId === source.droppableId &&
       destination.index === source.index
     ) {
       return;
     }
-
     if (type === 'column') {
       const newColumnOrder = Array.from(this.state.columnOrder);
       newColumnOrder.splice(source.index, 1);
@@ -206,7 +256,6 @@ export default class App extends React.Component {
         ...start,
         sessionIds: newSessionIds,
       };
-
       const newState = {
         ...this.state,
         columns: {
@@ -214,25 +263,21 @@ export default class App extends React.Component {
           [newColumn.id]: newColumn,
         },
       };
-
       this.setState(newState);
       return;
     }
-
     const startSessionIds = Array.from(start.sessionIds);
     startSessionIds.splice(source.index, 1);
     const newStart = {
       ...start,
       sessionIds: startSessionIds,
     };
-
     const finishSessionIds = Array.from(finish.sessionIds);
     finishSessionIds.splice(destination.index, 0, draggableId);
     const newFinish = {
       ...finish,
       sessionIds: finishSessionIds,
     };
-
     const newState = {
       ...this.state,
       columns: {
@@ -242,17 +287,16 @@ export default class App extends React.Component {
       },
     };
     this.setState(newState);
-
   };
 
 
   render() {
     return (
       <div>
-        <DragDropContext 
-        onDragStart={this.onDragStart}
-        onDragEnd={this.onDragEnd}
-        onDragUpdate={this.onDragUpdate}
+        <DragDropContext
+          onDragStart={this.onDragStart}
+          onDragEnd={this.onDragEnd}
+          onDragUpdate={this.onDragUpdate}
         >
           <Droppable
             droppableId="all-columns"
@@ -267,14 +311,14 @@ export default class App extends React.Component {
                 {this.state.columnOrder.map((columnId, index) => {
                   const column = this.state.columns[columnId];
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
-                  return <Column 
-                  key={column.id} 
-                  column={column} 
-                  submitSession={this.submitSession} 
-                  sessions={sessions}
-                  index={index} 
-                  
-                   />;
+                  return <Column
+                    key={column.id}
+                    column={column}
+                    submitSession={this.submitSession}
+                    sessions={sessions}
+                    index={index}
+
+                  />;
                 })}
                 {provided.placeholder}
               </Container>
@@ -289,7 +333,7 @@ export default class App extends React.Component {
             <form onSubmit={(e) => this.submitColumn(e)}>
               {/* <label> Title: </label> */}
               <input type="text" onChange={this.handleChange} required />
-              <input type="submit" value="Submit"  />
+              <input type="submit" value="Submit" />
             </form> </FormContainer>
           : ''}
       </div>
@@ -301,7 +345,7 @@ export default class App extends React.Component {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const colRefPosts = collection(db, 'sessions');
+const colRefSessions = collection(db, 'sessions');
 const colRefColumns = collection(db, 'columns');
 
 

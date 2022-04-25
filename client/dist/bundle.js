@@ -167,8 +167,24 @@ var App = /*#__PURE__*/function (_React$Component) {
     _this = _super.call(this, props);
     _this.state = {
       sessions: {},
-      columns: {},
-      columnOrder: [],
+      columns: {
+        'column-1': {
+          id: 'column-1',
+          title: 'Ideas',
+          sessionIds: []
+        },
+        'column-2': {
+          id: 'column-2',
+          title: 'Notes',
+          sessionIds: []
+        },
+        'column-3': {
+          id: 'column-3',
+          title: 'Suggestions',
+          sessionIds: []
+        }
+      },
+      columnOrder: ["column-1", "column-2", "column-3"],
       addSession: false,
       addColumn: false,
       totalSessions: 5,
@@ -188,35 +204,56 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function componentDidMount() {
       var _this2 = this;
 
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefColumns).then(function (snapshot) {
-        var columns = [];
+      // getDocs(colRefColumns)
+      // .then((snapshot) => {
+      //   let columns = [];
+      //   let newColumnOrder = [];
+      //   snapshot.docs.forEach((doc) => {
+      //     columns.push({ ...doc.data(), id: doc.id })
+      //     newColumnOrder.push(doc.id)
+      //   })
+      //   //console.log(columns);
+      //   //console.log(newColumnOrder);
+      //   columns.forEach((column) => {
+      //     console.log(column);
+      //   })
+      //   this.setState({columns: columns })
+      // })
+      // .catch(err => {
+      //   console.log(err.message);
+      // })
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefSessions).then(function (snapshot) {
+        var sessions = {};
+        var revcolumns = {
+          'column-1': {
+            id: 'column-1',
+            title: 'Ideas',
+            sessionIds: ["session-1", "session-2", "session-3"]
+          },
+          'column-2': {
+            id: 'column-2',
+            title: 'Notes',
+            sessionIds: []
+          },
+          'column-3': {
+            id: 'column-3',
+            title: 'Suggestions',
+            sessionIds: []
+          }
+        };
         snapshot.docs.forEach(function (doc) {
-          columns.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
-            id: doc.id
-          }));
+          sessions[doc.id] = _objectSpread({}, doc.data()); //sessions.push({ ...doc.data(), id: doc.id })
         });
-        console.log(columns);
-        columns.forEach(function (column) {//console.log(column);
-        });
+        console.log(sessions); // sessions.forEach((post) => {
+        //   console.log(post);
+        // })
+        //map to column sessions?
+
+        console.log(revcolumns);
 
         _this2.setState({
-          columns: columns
-        });
-      })["catch"](function (err) {
-        console.log(err.message);
-      });
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefPosts).then(function (snapshot) {
-        var posts = [];
-        snapshot.docs.forEach(function (doc) {
-          posts.push(_objectSpread(_objectSpread({}, doc.data()), {}, {
-            id: doc.id
-          }));
-        });
-        posts.forEach(function (post) {//console.log(post);
-        });
-
-        _this2.setState({
-          sessions: posts
+          sessions: sessions,
+          columns: revcolumns
         });
       })["catch"](function (err) {
         console.log(err.message);
@@ -415,7 +452,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
-var colRefPosts = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
+var colRefSessions = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
 var colRefColumns = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'columns');
 
 /***/ }),
