@@ -196,9 +196,8 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       //SESSIONS
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
-        var userSessions = snapshot.data();
+        var userSessions = snapshot.data().sessions;
         var userArray = Object.keys(userSessions);
-        console.log(userArray);
         var revcolumns = {
           'column-1': {
             id: 'column-1',
@@ -226,9 +225,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         isHidden: false,
         date: Date.now()
       };
-
-      var updatedSessions = _objectSpread({}, this.state.sessions);
-
+      var updatedSessions = this.state.sessions;
       updatedSessions[newId] = newSession;
       var updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
       updatedOrder.push(newId);
@@ -241,8 +238,9 @@ var App = /*#__PURE__*/function (_React$Component) {
         columns: oldColumns,
         totalSessions: newTotal
       };
-      console.log(updatedSessions);
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, updatedSessions);
+      var nestedSessions = {};
+      nestedSessions['sessions'] = updatedSessions;
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, nestedSessions);
       this.setState(newState);
     }
   }, {
@@ -403,9 +401,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
-var colRefSessions = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
-var colRefColumns = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'columns');
-var userRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+var userRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "userDocs", "UGkjikltZYXeHCealI7i");
 
 /***/ }),
 

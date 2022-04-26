@@ -69,9 +69,8 @@ export default class App extends React.Component {
     getDoc(userRef)
       .then((snapshot) => {
 
-        let userSessions = snapshot.data();
+        let userSessions = snapshot.data().sessions;
         let userArray = Object.keys(userSessions);
-        console.log(userArray);
 
         let revcolumns = {
           'column-1': {
@@ -92,13 +91,10 @@ export default class App extends React.Component {
   submitSession(addedFrom, text) {
 
     let newId = `session-${this.state.totalSessions + 1}`;
-
+   
     let newSession = { id: newId, content: text, isHidden: false, date: Date.now() };
 
-    let updatedSessions = {
-      ...this.state.sessions
-    }
-
+    let updatedSessions = this.state.sessions;
     updatedSessions[newId] = newSession;
 
     let updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
@@ -118,14 +114,15 @@ export default class App extends React.Component {
       totalSessions: newTotal
     }
 
-    console.log(updatedSessions);
+    let nestedSessions = {};
+    nestedSessions['sessions'] = updatedSessions;
 
-    setDoc(userRef, updatedSessions)
+    setDoc(userRef, nestedSessions)
 
     this.setState(newState);
   }
 
-
+  
   makeColumn() {
     this.setState({ addColumn: !this.state.addColumn });
   }
@@ -277,8 +274,6 @@ export default class App extends React.Component {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-const colRefSessions = collection(db, 'sessions');
-const colRefColumns = collection(db, 'columns');
-const userRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+const userRef = doc(db, "userDocs", "UGkjikltZYXeHCealI7i");
 
 
