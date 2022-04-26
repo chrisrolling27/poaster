@@ -65,73 +65,32 @@ export default class App extends React.Component {
   componentDidMount() {
 
     //SESSIONS
-   
     const xpRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
 
     getDoc(xpRef)
-    .then((snapshot) => {
+      .then((snapshot) => {
 
-    let userSessions = snapshot.data();
-    let userArray = Object.keys(userSessions);
+        let userSessions = snapshot.data();
+        let userArray = Object.keys(userSessions);
 
-      console.log(userSessions);
+        console.log(userSessions);
 
-    let revcolumns = {
-      'column-1': {
-        id: 'column-1',
-        title: 'Ideas',
-        sessionIds: [],
-      }
-    };
+        let revcolumns = {
+          'column-1': {
+            id: 'column-1',
+            title: 'Ideas',
+            sessionIds: userArray,
+          }
+        };
 
-    //revcolumns['column-1'].sessionIds = userArray;
-    //took out userArray column from setstate 
+        this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: userArray.length })
 
-    this.setState({ sessions: userArray, columns: revcolumns, totalSessions: userArray.length })
-
-    })
-
-
-    // getDocs(colRefSessions)
-    //   .then((snapshot) => {
-    //     let sessions = {};
-
-    //     //come back for column placeholder
-    //     let revcolumns = {
-    //       'column-1': {
-    //         id: 'column-1',
-    //         title: 'Ideas',
-    //         sessionIds: ["session-1"],
-    //       }
-    //     };
-
-
-    //     //gets user doc from firebase, returns userSessions object with all sessions
-
-    //     snapshot.docs.forEach((doc) => {
-    //       sessions[doc.id] = { ...doc.data() };
-    //     })
-    //     let userSessions = sessions.XpwEPcZRorwWjrm6mWbp.sessions;
-
-    //     let sessionArray = (Object.keys(userSessions));
-
-    //     revcolumns['column-1'].sessionIds = sessionArray;
-
-
-    //     this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: sessionArray.length })
-    //   })
-
-    //   .catch(err => {
-    //     //console.log(err);
-    //   })
-
-
+      })
+      .catch(err => {
+        console.log(err);
+      })
 
   }
-
-
-
-
 
 
   submitSession(addedFrom, text) {
