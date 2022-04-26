@@ -214,25 +214,31 @@ var App = /*#__PURE__*/function (_React$Component) {
       //   console.log(err.message);
       // })
       //SESSIONS
-      //needs to store with content, id, timestamp, isHidden 
+      //needs to store with id, content, timestamp, isHidden 
       //one doc per session 
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefSessions).then(function (snapshot) {
-        var sessions = {};
+        var sessions = {}; //come back for column placeholder
+
         var revcolumns = {
           'column-1': {
             id: 'column-1',
             title: 'Ideas',
             sessionIds: ["session-1"]
           }
-        };
+        }; //gets user doc from firebase, returns userSessions object with all sessions
+
         snapshot.docs.forEach(function (doc) {
           sessions[doc.id] = _objectSpread({}, doc.data());
         });
-        console.log(sessions);
+        var userSessions = sessions.XpwEPcZRorwWjrm6mWbp.sessions;
+        var sessionArray = Object.keys(userSessions);
+        console.log(sessionArray);
+        revcolumns['column-1'].sessionIds = sessionArray;
 
         _this2.setState({
-          sessions: sessions,
-          columns: revcolumns
+          sessions: userSessions,
+          columns: revcolumns,
+          totalSessions: sessionArray.length
         });
       })["catch"](function (err) {
         console.log(err.message);
@@ -241,10 +247,12 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
-      var newId = "session-".concat(this.state.totalSessions);
+      var newId = "session-".concat(this.state.totalSessions + 1);
       var newSession = {
         id: newId,
-        content: text
+        content: text,
+        isHidden: false,
+        date: Date.now()
       };
 
       var updatedSessions = _objectSpread({}, this.state.sessions);
@@ -263,10 +271,13 @@ var App = /*#__PURE__*/function (_React$Component) {
         totalSessions: newTotal
       });
 
-      console.log(updatedSessions);
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["addDoc"])(colRefSessions, updatedSessions).then(function () {
-        console.log('added state');
-      });
+      console.log(updatedSessions); //const newCityRef = doc(collection(db, "sessions"));
+      //setDoc(newCityRef, sessions);
+      //   addDoc(colRefSessions, updatedSessions)
+      //   .then(() => {
+      //   console.log('added state')
+      // })
+
       this.setState(newState);
     }
   }, {

@@ -88,12 +88,14 @@ export default class App extends React.Component {
     // })
 
     //SESSIONS
-    //needs to store with content, id, timestamp, isHidden 
+    //needs to store with id, content, timestamp, isHidden 
     //one doc per session 
 
     getDocs(colRefSessions)
       .then((snapshot) => {
         let sessions = {};
+
+        //come back for column placeholder
         let revcolumns = {
           'column-1': {
             id: 'column-1',
@@ -101,11 +103,21 @@ export default class App extends React.Component {
             sessionIds: ["session-1"],
           }
         };
+
+        //gets user doc from firebase, returns userSessions object with all sessions
         snapshot.docs.forEach((doc) => {
           sessions[doc.id] = { ...doc.data() };
         })
-        console.log(sessions);
-        this.setState({ sessions: sessions, columns: revcolumns })
+        let userSessions = sessions.XpwEPcZRorwWjrm6mWbp.sessions;
+
+        let sessionArray = (Object.keys(userSessions));
+
+        console.log(sessionArray);
+
+        revcolumns['column-1'].sessionIds = sessionArray; 
+
+        
+        this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: sessionArray.length })
       })
 
       .catch(err => {
@@ -114,12 +126,10 @@ export default class App extends React.Component {
   }
 
 
-
-
   submitSession(addedFrom, text) {
 
-    let newId = `session-${this.state.totalSessions}`;
-    let newSession = { id: newId, content: text };
+    let newId = `session-${this.state.totalSessions + 1}`;
+    let newSession = { id: newId, content: text, isHidden: false, date: Date.now()  };
 
     let updatedSessions = {
       ...this.state.sessions
@@ -147,10 +157,14 @@ export default class App extends React.Component {
 
     console.log(updatedSessions);
 
-    addDoc(colRefSessions, updatedSessions)
-    .then(() => {
-    console.log('added state')
-  })
+    //const newCityRef = doc(collection(db, "sessions"));
+
+    //setDoc(newCityRef, sessions);
+
+  //   addDoc(colRefSessions, updatedSessions)
+  //   .then(() => {
+  //   console.log('added state')
+  // })
 
 
     this.setState(newState);
