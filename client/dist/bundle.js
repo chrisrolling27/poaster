@@ -194,55 +194,49 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function componentDidMount() {
       var _this2 = this;
 
-      //COLUMNS
-      // getDocs(colRefColumns)
-      // .then((snapshot) => {
-      //   let columns = [];
-      //   let newColumnOrder = [];
-      //   snapshot.docs.forEach((doc) => {
-      //     columns.push({ ...doc.data(), id: doc.id })
-      //     newColumnOrder.push(doc.id)
-      //   })
-      //   //console.log(columns);
-      //   //console.log(newColumnOrder);
-      //   columns.forEach((column) => {
-      //     console.log(column);
-      //   })
-      //   this.setState({columns: columns })
-      // })
-      // .catch(err => {
-      //   console.log(err.message);
-      // })
       //SESSIONS
-      //needs to store with id, content, timestamp, isHidden 
-      //one doc per session 
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefSessions).then(function (snapshot) {
-        var sessions = {}; //come back for column placeholder
-
+      var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(xpRef).then(function (snapshot) {
+        var userSessions = snapshot.data();
+        var userArray = Object.keys(userSessions);
+        console.log(userSessions);
         var revcolumns = {
           'column-1': {
             id: 'column-1',
             title: 'Ideas',
-            sessionIds: ["session-1"]
+            sessionIds: []
           }
-        }; //gets user doc from firebase, returns userSessions object with all sessions
-
-        snapshot.docs.forEach(function (doc) {
-          sessions[doc.id] = _objectSpread({}, doc.data());
-        });
-        var userSessions = sessions.XpwEPcZRorwWjrm6mWbp.sessions;
-        var sessionArray = Object.keys(userSessions);
-        console.log(sessionArray);
-        revcolumns['column-1'].sessionIds = sessionArray;
+        }; //revcolumns['column-1'].sessionIds = userArray;
+        //took out userArray column from setstate 
 
         _this2.setState({
-          sessions: userSessions,
+          sessions: userArray,
           columns: revcolumns,
-          totalSessions: sessionArray.length
+          totalSessions: userArray.length
         });
-      })["catch"](function (err) {
-        console.log(err.message);
-      });
+      }); // getDocs(colRefSessions)
+      //   .then((snapshot) => {
+      //     let sessions = {};
+      //     //come back for column placeholder
+      //     let revcolumns = {
+      //       'column-1': {
+      //         id: 'column-1',
+      //         title: 'Ideas',
+      //         sessionIds: ["session-1"],
+      //       }
+      //     };
+      //     //gets user doc from firebase, returns userSessions object with all sessions
+      //     snapshot.docs.forEach((doc) => {
+      //       sessions[doc.id] = { ...doc.data() };
+      //     })
+      //     let userSessions = sessions.XpwEPcZRorwWjrm6mWbp.sessions;
+      //     let sessionArray = (Object.keys(userSessions));
+      //     revcolumns['column-1'].sessionIds = sessionArray;
+      //     this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: sessionArray.length })
+      //   })
+      //   .catch(err => {
+      //     //console.log(err);
+      //   })
     }
   }, {
     key: "submitSession",
@@ -263,15 +257,16 @@ var App = /*#__PURE__*/function (_React$Component) {
       var oldColumns = this.state.columns;
       oldColumns[addedFrom].sessionIds = updatedOrder;
       var newTotal = this.state.totalSessions + 1;
-
-      var newState = _objectSpread(_objectSpread({}, this.state), {}, {
+      var newState = {
         sessions: updatedSessions,
         addSession: false,
         columns: oldColumns,
         totalSessions: newTotal
-      });
-
-      console.log(updatedSessions); //const newCityRef = doc(collection(db, "sessions"));
+      };
+      console.log(updatedSessions);
+      var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(xpRef, updatedSessions); //updateDoc('XpwEPcZRorwWjrm6mWbp', updatedSessions);
+      //const newCityRef = doc(collection(db, "sessions"));
       //setDoc(newCityRef, sessions);
       //   addDoc(colRefSessions, updatedSessions)
       //   .then(() => {
@@ -440,6 +435,7 @@ var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_f
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
 var colRefSessions = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
 var colRefColumns = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'columns');
+var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
 
 /***/ }),
 
