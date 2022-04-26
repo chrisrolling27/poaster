@@ -172,23 +172,13 @@ var App = /*#__PURE__*/function (_React$Component) {
           id: 'column-1',
           title: 'Ideas',
           sessionIds: []
-        },
-        'column-2': {
-          id: 'column-2',
-          title: 'Notes',
-          sessionIds: []
-        },
-        'column-3': {
-          id: 'column-3',
-          title: 'Suggestions',
-          sessionIds: []
         }
       },
-      columnOrder: ["column-1", "column-2", "column-3"],
+      columnOrder: ["column-1"],
       addSession: false,
       addColumn: false,
-      totalSessions: 5,
-      totalColumns: 3,
+      totalSessions: 2,
+      totalColumns: 1,
       columnName: ''
     };
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -204,6 +194,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function componentDidMount() {
       var _this2 = this;
 
+      //COLUMNS
       // getDocs(colRefColumns)
       // .then((snapshot) => {
       //   let columns = [];
@@ -222,34 +213,22 @@ var App = /*#__PURE__*/function (_React$Component) {
       // .catch(err => {
       //   console.log(err.message);
       // })
+      //SESSIONS
+      //needs to store with content, id, timestamp, isHidden 
+      //one doc per session 
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDocs"])(colRefSessions).then(function (snapshot) {
         var sessions = {};
         var revcolumns = {
           'column-1': {
             id: 'column-1',
             title: 'Ideas',
-            sessionIds: ["session-1", "session-2", "session-3"]
-          },
-          'column-2': {
-            id: 'column-2',
-            title: 'Notes',
-            sessionIds: []
-          },
-          'column-3': {
-            id: 'column-3',
-            title: 'Suggestions',
-            sessionIds: []
+            sessionIds: ["session-1"]
           }
         };
         snapshot.docs.forEach(function (doc) {
-          sessions[doc.id] = _objectSpread({}, doc.data()); //sessions.push({ ...doc.data(), id: doc.id })
+          sessions[doc.id] = _objectSpread({}, doc.data());
         });
-        console.log(sessions); // sessions.forEach((post) => {
-        //   console.log(post);
-        // })
-        //map to column sessions?
-
-        console.log(revcolumns);
+        console.log(sessions);
 
         _this2.setState({
           sessions: sessions,
@@ -284,16 +263,12 @@ var App = /*#__PURE__*/function (_React$Component) {
         totalSessions: newTotal
       });
 
+      console.log(updatedSessions);
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["addDoc"])(colRefSessions, updatedSessions).then(function () {
+        console.log('added state');
+      });
       this.setState(newState);
-    } //console.log(this.state.sessions.fromy.content)
-    //console.log(this.state);
-    //this works and does in fact add state.
-    // addDoc(colRef, this.state)
-    // .then(() => {
-    //   console.log('added state?')
-    // })
-    ////
-
+    }
   }, {
     key: "makeColumn",
     value: function makeColumn(e) {
@@ -640,7 +615,7 @@ var _templateObject;
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: center;\n  padding: 70px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  height: 70px;\n  background-color: ", ";\n"])), function (props) {
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: center;\n  padding: 50px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  height: 30px;\n  background-color: ", ";\n"])), function (props) {
   return props.isDragging ? 'lightgreen' : 'white';
 });
 

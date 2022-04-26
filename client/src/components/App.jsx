@@ -35,34 +35,22 @@ export default class App extends React.Component {
 
     this.state = {
 
-      sessions: {
-
-      },
+      sessions: {},
 
       columns: {
         'column-1': {
           id: 'column-1',
           title: 'Ideas',
           sessionIds: [],
-        },
-        'column-2': {
-          id: 'column-2',
-          title: 'Notes',
-          sessionIds: [],
-        },
-        'column-3': {
-          id: 'column-3',
-          title: 'Suggestions',
-          sessionIds: [],
-        },
+        }
 
       },
 
-      columnOrder: ["column-1", "column-2", "column-3"],
+      columnOrder: ["column-1"],
       addSession: false,
       addColumn: false,
-      totalSessions: 5,
-      totalColumns: 3,
+      totalSessions: 2,
+      totalColumns: 1,
       columnName: '',
 
     };
@@ -76,6 +64,7 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
+    //COLUMNS
     // getDocs(colRefColumns)
     // .then((snapshot) => {
     //   let columns = [];
@@ -98,57 +87,34 @@ export default class App extends React.Component {
     //   console.log(err.message);
     // })
 
+    //SESSIONS
+    //needs to store with content, id, timestamp, isHidden 
+    //one doc per session 
 
     getDocs(colRefSessions)
       .then((snapshot) => {
         let sessions = {};
-
         let revcolumns = {
           'column-1': {
             id: 'column-1',
-              title: 'Ideas',
-                sessionIds: ["session-1", "session-2", "session-3"],
-          },
-          'column-2': {
-            id: 'column-2',
-              title: 'Notes',
-                sessionIds: [],
-          },
-          'column-3': {
-            id: 'column-3',
-              title: 'Suggestions',
-                sessionIds: [],
+            title: 'Ideas',
+            sessionIds: ["session-1"],
           }
-
         };
-
         snapshot.docs.forEach((doc) => {
-
           sessions[doc.id] = { ...doc.data() };
-          //sessions.push({ ...doc.data(), id: doc.id })
-
         })
-
         console.log(sessions);
-        // sessions.forEach((post) => {
-        //   console.log(post);
-        // })
-        //map to column sessions?
-
-        
-
-        console.log(revcolumns);
-
-
-        this.setState({ sessions: sessions, columns:revcolumns })
-
+        this.setState({ sessions: sessions, columns: revcolumns })
       })
+
       .catch(err => {
         console.log(err.message);
       })
-
-
   }
+
+
+
 
   submitSession(addedFrom, text) {
 
@@ -179,166 +145,164 @@ export default class App extends React.Component {
       totalSessions: newTotal
     }
 
+    console.log(updatedSessions);
+
+    addDoc(colRefSessions, updatedSessions)
+    .then(() => {
+    console.log('added state')
+  })
+
+
     this.setState(newState);
   }
 
 
-  //console.log(this.state.sessions.fromy.content)
-  //console.log(this.state);
-  //this works and does in fact add state.
-  // addDoc(colRef, this.state)
-  // .then(() => {
-  //   console.log('added state?')
-  // })
-  ////
+
+makeColumn(e) {
+  this.setState({ addColumn: !this.state.addColumn });
+}
+
+handleChange(e) {
+  this.setState({ columnName: e.target.value });
+}
+
+submitColumn(e) {
+  e.preventDefault();
+
+  let incrementCol = this.state.totalColumns + 1;
+  let newId = `column-${incrementCol}`;
+
+  let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
+  let updatedColumns = this.state.columns;
+  updatedColumns[newId] = newColumn;
+
+  let updatedColumnOrder = this.state.columnOrder;
+  updatedColumnOrder.push(newId);
+
+  this.setState({ addColumn: false, totalColumns: incrementCol });
+}
 
 
 
-  makeColumn(e) {
-    this.setState({ addColumn: !this.state.addColumn });
+onDragEnd(result) {
+  const { destination, source, draggableId, type } = result;
+  if (!destination) {
+    return;
   }
-
-  handleChange(e) {
-    this.setState({ columnName: e.target.value });
+  if (
+    destination.droppableId === source.droppableId &&
+    destination.index === source.index
+  ) {
+    return;
   }
+  if (type === 'column') {
+    const newColumnOrder = Array.from(this.state.columnOrder);
+    newColumnOrder.splice(source.index, 1);
+    newColumnOrder.splice(destination.index, 0, draggableId);
 
-  submitColumn(e) {
-    e.preventDefault();
-
-    let incrementCol = this.state.totalColumns + 1;
-    let newId = `column-${incrementCol}`;
-
-    let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
-    let updatedColumns = this.state.columns;
-    updatedColumns[newId] = newColumn;
-
-    let updatedColumnOrder = this.state.columnOrder;
-    updatedColumnOrder.push(newId);
-
-    this.setState({ addColumn: false, totalColumns: incrementCol });
-  }
-
-
-
-  onDragEnd(result) {
-    const { destination, source, draggableId, type } = result;
-    if (!destination) {
-      return;
-    }
-    if (
-      destination.droppableId === source.droppableId &&
-      destination.index === source.index
-    ) {
-      return;
-    }
-    if (type === 'column') {
-      const newColumnOrder = Array.from(this.state.columnOrder);
-      newColumnOrder.splice(source.index, 1);
-      newColumnOrder.splice(destination.index, 0, draggableId);
-
-      const newState = {
-        ...this.state,
-        columnOrder: newColumnOrder,
-      };
-      this.setState(newState);
-      return;
-    }
-
-    const start = this.state.columns[source.droppableId];
-    const finish = this.state.columns[destination.droppableId];
-
-    if (start === finish) {
-      const newSessionIds = Array.from(start.sessionIds);
-      newSessionIds.splice(source.index, 1);
-      newSessionIds.splice(destination.index, 0, draggableId);
-
-      const newColumn = {
-        ...start,
-        sessionIds: newSessionIds,
-      };
-      const newState = {
-        ...this.state,
-        columns: {
-          ...this.state.columns,
-          [newColumn.id]: newColumn,
-        },
-      };
-      this.setState(newState);
-      return;
-    }
-    const startSessionIds = Array.from(start.sessionIds);
-    startSessionIds.splice(source.index, 1);
-    const newStart = {
-      ...start,
-      sessionIds: startSessionIds,
+    const newState = {
+      ...this.state,
+      columnOrder: newColumnOrder,
     };
-    const finishSessionIds = Array.from(finish.sessionIds);
-    finishSessionIds.splice(destination.index, 0, draggableId);
-    const newFinish = {
-      ...finish,
-      sessionIds: finishSessionIds,
+    this.setState(newState);
+    return;
+  }
+
+  const start = this.state.columns[source.droppableId];
+  const finish = this.state.columns[destination.droppableId];
+
+  if (start === finish) {
+    const newSessionIds = Array.from(start.sessionIds);
+    newSessionIds.splice(source.index, 1);
+    newSessionIds.splice(destination.index, 0, draggableId);
+
+    const newColumn = {
+      ...start,
+      sessionIds: newSessionIds,
     };
     const newState = {
       ...this.state,
       columns: {
         ...this.state.columns,
-        [newStart.id]: newStart,
-        [newFinish.id]: newFinish,
+        [newColumn.id]: newColumn,
       },
     };
     this.setState(newState);
-  };
-
-
-  render() {
-    return (
-      <div>
-        <DragDropContext
-          onDragStart={this.onDragStart}
-          onDragEnd={this.onDragEnd}
-          onDragUpdate={this.onDragUpdate}
-        >
-          <Droppable
-            droppableId="all-columns"
-            direction="horizontal"
-            type="column"
-          >
-            {provided => (
-              <Container
-                {...provided.droppableProps}
-                ref={provided.innerRef}
-              >
-                {this.state.columnOrder.map((columnId, index) => {
-                  const column = this.state.columns[columnId];
-                  const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
-                  return <Column
-                    key={column.id}
-                    column={column}
-                    submitSession={this.submitSession}
-                    sessions={sessions}
-                    index={index}
-
-                  />;
-                })}
-                {provided.placeholder}
-              </Container>
-            )}
-          </Droppable>
-        </DragDropContext>
-
-        {/* ADDS COLUMS  */}
-        <AddColumnButton onClick={this.makeColumn}>+ Column</AddColumnButton>
-        {this.state.addColumn ?
-          <FormContainer>
-            <form onSubmit={(e) => this.submitColumn(e)}>
-              {/* <label> Title: </label> */}
-              <input type="text" onChange={this.handleChange} required />
-              <input type="submit" value="Submit" />
-            </form> </FormContainer>
-          : ''}
-      </div>
-    );
+    return;
   }
+  const startSessionIds = Array.from(start.sessionIds);
+  startSessionIds.splice(source.index, 1);
+  const newStart = {
+    ...start,
+    sessionIds: startSessionIds,
+  };
+  const finishSessionIds = Array.from(finish.sessionIds);
+  finishSessionIds.splice(destination.index, 0, draggableId);
+  const newFinish = {
+    ...finish,
+    sessionIds: finishSessionIds,
+  };
+  const newState = {
+    ...this.state,
+    columns: {
+      ...this.state.columns,
+      [newStart.id]: newStart,
+      [newFinish.id]: newFinish,
+    },
+  };
+  this.setState(newState);
+};
+
+
+render() {
+  return (
+    <div>
+      <DragDropContext
+        onDragStart={this.onDragStart}
+        onDragEnd={this.onDragEnd}
+        onDragUpdate={this.onDragUpdate}
+      >
+        <Droppable
+          droppableId="all-columns"
+          direction="horizontal"
+          type="column"
+        >
+          {provided => (
+            <Container
+              {...provided.droppableProps}
+              ref={provided.innerRef}
+            >
+              {this.state.columnOrder.map((columnId, index) => {
+                const column = this.state.columns[columnId];
+                const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
+                return <Column
+                  key={column.id}
+                  column={column}
+                  submitSession={this.submitSession}
+                  sessions={sessions}
+                  index={index}
+
+                />;
+              })}
+              {provided.placeholder}
+            </Container>
+          )}
+        </Droppable>
+      </DragDropContext>
+
+      {/* ADDS COLUMS  */}
+      <AddColumnButton onClick={this.makeColumn}>+ Column</AddColumnButton>
+      {this.state.addColumn ?
+        <FormContainer>
+          <form onSubmit={(e) => this.submitColumn(e)}>
+            {/* <label> Title: </label> */}
+            <input type="text" onChange={this.handleChange} required />
+            <input type="submit" value="Submit" />
+          </form> </FormContainer>
+        : ''}
+    </div>
+  );
+}
 }
 
 //DB SETUP

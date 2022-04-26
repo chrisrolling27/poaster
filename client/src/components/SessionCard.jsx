@@ -5,12 +5,12 @@ import styled from 'styled-components';
 const Container = styled.div`
   margin: 8px;
   text-align: center;
-  padding: 70px 0;
+  padding: 50px 0;
   border: 1px solid lightgrey;
   border-radius: 2px;
   margin-bottom: 8px;
   background-color: white;
-  height: 70px;
+  height: 30px;
   background-color: ${props => (props.isDragging ? 'lightgreen' : 'white')};
 `;
 
