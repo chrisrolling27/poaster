@@ -174,7 +174,7 @@ var App = /*#__PURE__*/function (_React$Component) {
           sessionIds: []
         }
       },
-      columnOrder: ["column-1"],
+      columnOrder: ['column-1'],
       addSession: false,
       addColumn: false,
       totalSessions: 2,
@@ -194,21 +194,15 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function componentDidMount() {
       var _this2 = this;
 
-      //SESSIONS
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
         var userSessions = snapshot.data().sessions;
         var userArray = Object.keys(userSessions);
-        var revcolumns = {
-          'column-1': {
-            id: 'column-1',
-            title: 'Ideas',
-            sessionIds: userArray
-          }
-        };
+        var userColumns = snapshot.data().columns;
+        userColumns['sessionIds'] = userArray;
 
         _this2.setState({
           sessions: userSessions,
-          columns: revcolumns,
+          columns: userColumns,
           totalSessions: userArray.length
         });
       })["catch"](function (err) {

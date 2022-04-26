@@ -46,7 +46,7 @@ export default class App extends React.Component {
 
       },
 
-      columnOrder: ["column-1"],
+      columnOrder: ['column-1'],
       addSession: false,
       addColumn: false,
       totalSessions: 2,
@@ -65,22 +65,17 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
-    //SESSIONS
     getDoc(userRef)
       .then((snapshot) => {
 
         let userSessions = snapshot.data().sessions;
         let userArray = Object.keys(userSessions);
 
-        let revcolumns = {
-          'column-1': {
-            id: 'column-1',
-            title: 'Ideas',
-            sessionIds: userArray,
-          }
-        };
+        let userColumns = snapshot.data().columns;
 
-        this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: userArray.length })
+        userColumns['sessionIds'] = userArray;
+
+        this.setState({ sessions: userSessions, columns: userColumns, totalSessions: userArray.length })
       })
       .catch(err => {
         console.log(err);
@@ -122,7 +117,7 @@ export default class App extends React.Component {
     this.setState(newState);
   }
 
-  
+
   makeColumn() {
     this.setState({ addColumn: !this.state.addColumn });
   }
