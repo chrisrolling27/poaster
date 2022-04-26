@@ -62,18 +62,15 @@ export default class App extends React.Component {
     this.handleChange = this.handleChange.bind(this);
   }
 
+
   componentDidMount() {
 
     //SESSIONS
-    const xpRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
-
     getDoc(xpRef)
       .then((snapshot) => {
 
         let userSessions = snapshot.data();
         let userArray = Object.keys(userSessions);
-
-        console.log(userSessions);
 
         let revcolumns = {
           'column-1': {
@@ -84,12 +81,10 @@ export default class App extends React.Component {
         };
 
         this.setState({ sessions: userSessions, columns: revcolumns, totalSessions: userArray.length })
-
       })
       .catch(err => {
         console.log(err);
       })
-
   }
 
 
@@ -124,30 +119,13 @@ export default class App extends React.Component {
 
     console.log(updatedSessions);
 
-    const xpRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
-
     setDoc(xpRef, updatedSessions)
-
-
-    //updateDoc('XpwEPcZRorwWjrm6mWbp', updatedSessions);
-
-
-    //const newCityRef = doc(collection(db, "sessions"));
-
-    //setDoc(newCityRef, sessions);
-
-    //   addDoc(colRefSessions, updatedSessions)
-    //   .then(() => {
-    //   console.log('added state')
-    // })
-
 
     this.setState(newState);
   }
 
 
-
-  makeColumn(e) {
+  makeColumn() {
     this.setState({ addColumn: !this.state.addColumn });
   }
 

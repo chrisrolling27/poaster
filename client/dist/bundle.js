@@ -195,11 +195,9 @@ var App = /*#__PURE__*/function (_React$Component) {
       var _this2 = this;
 
       //SESSIONS
-      var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(xpRef).then(function (snapshot) {
         var userSessions = snapshot.data();
         var userArray = Object.keys(userSessions);
-        console.log(userSessions);
         var revcolumns = {
           'column-1': {
             id: 'column-1',
@@ -243,20 +241,12 @@ var App = /*#__PURE__*/function (_React$Component) {
         totalSessions: newTotal
       };
       console.log(updatedSessions);
-      var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(xpRef, updatedSessions); //updateDoc('XpwEPcZRorwWjrm6mWbp', updatedSessions);
-      //const newCityRef = doc(collection(db, "sessions"));
-      //setDoc(newCityRef, sessions);
-      //   addDoc(colRefSessions, updatedSessions)
-      //   .then(() => {
-      //   console.log('added state')
-      // })
-
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(xpRef, updatedSessions);
       this.setState(newState);
     }
   }, {
     key: "makeColumn",
-    value: function makeColumn(e) {
+    value: function makeColumn() {
       this.setState({
         addColumn: !this.state.addColumn
       });
