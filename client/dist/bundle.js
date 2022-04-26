@@ -195,9 +195,10 @@ var App = /*#__PURE__*/function (_React$Component) {
       var _this2 = this;
 
       //SESSIONS
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(xpRef).then(function (snapshot) {
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
         var userSessions = snapshot.data();
         var userArray = Object.keys(userSessions);
+        console.log(userArray);
         var revcolumns = {
           'column-1': {
             id: 'column-1',
@@ -241,7 +242,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         totalSessions: newTotal
       };
       console.log(updatedSessions);
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(xpRef, updatedSessions);
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, updatedSessions);
       this.setState(newState);
     }
   }, {
@@ -404,7 +405,7 @@ var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_f
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
 var colRefSessions = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'sessions');
 var colRefColumns = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["collection"])(db, 'columns');
-var xpRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+var userRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
 
 /***/ }),
 

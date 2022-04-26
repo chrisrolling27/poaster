@@ -66,11 +66,12 @@ export default class App extends React.Component {
   componentDidMount() {
 
     //SESSIONS
-    getDoc(xpRef)
+    getDoc(userRef)
       .then((snapshot) => {
 
         let userSessions = snapshot.data();
         let userArray = Object.keys(userSessions);
+        console.log(userArray);
 
         let revcolumns = {
           'column-1': {
@@ -119,7 +120,7 @@ export default class App extends React.Component {
 
     console.log(updatedSessions);
 
-    setDoc(xpRef, updatedSessions)
+    setDoc(userRef, updatedSessions)
 
     this.setState(newState);
   }
@@ -278,6 +279,6 @@ const db = getFirestore(app);
 
 const colRefSessions = collection(db, 'sessions');
 const colRefColumns = collection(db, 'columns');
-const xpRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
+const userRef = doc(db, "sessions", "XpwEPcZRorwWjrm6mWbp");
 
 
