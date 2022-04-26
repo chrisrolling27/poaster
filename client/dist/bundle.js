@@ -213,6 +213,7 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
       var newId = "session-".concat(this.state.totalSessions + 1);
+      var newTotal = this.state.totalSessions + 1;
       var newSession = {
         id: newId,
         content: text,
@@ -221,20 +222,20 @@ var App = /*#__PURE__*/function (_React$Component) {
       };
       var updatedSessions = this.state.sessions;
       updatedSessions[newId] = newSession;
-      var updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
-      updatedOrder.push(newId);
-      var oldColumns = this.state.columns;
-      oldColumns[addedFrom].sessionIds = updatedOrder;
-      var newTotal = this.state.totalSessions + 1;
+      var currentColumns = this.state.columns;
+      var newOrder = Array.from(currentColumns[addedFrom].sessionIds);
+      newOrder.push(newId);
+      currentColumns[addedFrom].sessionIds = newOrder;
       var newState = {
         sessions: updatedSessions,
         addSession: false,
-        columns: oldColumns,
+        columns: currentColumns,
         totalSessions: newTotal
       };
-      var nestedSessions = {};
-      nestedSessions['sessions'] = updatedSessions;
-      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, nestedSessions);
+      var nestedUpdate = {};
+      nestedUpdate['sessions'] = updatedSessions;
+      nestedUpdate['columns'] = currentColumns;
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, nestedUpdate);
       this.setState(newState);
     }
   }, {
@@ -338,7 +339,13 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var newState = _objectSpread(_objectSpread({}, this.state), {}, {
         columns: _objectSpread(_objectSpread({}, this.state.columns), {}, (_objectSpread3 = {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()(_objectSpread3, newStart.id, newStart), _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()(_objectSpread3, newFinish.id, newFinish), _objectSpread3))
-      });
+      }); //tried to persist order but NewStart seems to be adding column order to columns and not a particular column...
+      // nestedUpdate = {
+      //   columns: newState.columns,
+      //   sessions: newState.sessions
+      // };
+      // setDoc(userRef, nestedUpdate);
+
 
       this.setState(newState);
     }

@@ -86,33 +86,32 @@ export default class App extends React.Component {
   submitSession(addedFrom, text) {
 
     let newId = `session-${this.state.totalSessions + 1}`;
-   
+    let newTotal = this.state.totalSessions + 1;
+
     let newSession = { id: newId, content: text, isHidden: false, date: Date.now() };
 
     let updatedSessions = this.state.sessions;
     updatedSessions[newId] = newSession;
 
-    let updatedOrder = Array.from(this.state.columns[addedFrom].sessionIds);
+    let currentColumns = this.state.columns;
 
-    updatedOrder.push(newId);
+    let newOrder = Array.from(currentColumns[addedFrom].sessionIds);
+    newOrder.push(newId);
 
-    let oldColumns = this.state.columns;
-
-    oldColumns[addedFrom].sessionIds = updatedOrder;
-
-    let newTotal = this.state.totalSessions + 1;
+    currentColumns[addedFrom].sessionIds = newOrder;
 
     let newState = {
       sessions: updatedSessions,
       addSession: false,
-      columns: oldColumns,
+      columns: currentColumns,
       totalSessions: newTotal
     }
 
-    let nestedSessions = {};
-    nestedSessions['sessions'] = updatedSessions;
+    let nestedUpdate = {};
+    nestedUpdate['sessions'] = updatedSessions;
+    nestedUpdate['columns'] = currentColumns;
 
-    setDoc(userRef, nestedSessions)
+    setDoc(userRef, nestedUpdate);
 
     this.setState(newState);
   }
@@ -145,16 +144,20 @@ export default class App extends React.Component {
 
 
   onDragEnd(result) {
+
     const { destination, source, draggableId, type } = result;
+
     if (!destination) {
       return;
     }
+
     if (
       destination.droppableId === source.droppableId &&
       destination.index === source.index
     ) {
       return;
     }
+
     if (type === 'column') {
       const newColumnOrder = Array.from(this.state.columnOrder);
       newColumnOrder.splice(source.index, 1);
@@ -190,6 +193,7 @@ export default class App extends React.Component {
       this.setState(newState);
       return;
     }
+    
     const startSessionIds = Array.from(start.sessionIds);
     startSessionIds.splice(source.index, 1);
     const newStart = {
@@ -202,6 +206,7 @@ export default class App extends React.Component {
       ...finish,
       sessionIds: finishSessionIds,
     };
+
     const newState = {
       ...this.state,
       columns: {
@@ -210,7 +215,17 @@ export default class App extends React.Component {
         [newFinish.id]: newFinish,
       },
     };
+
+    //tried to persist order but NewStart seems to be adding column order to columns and not a particular column...
+    // nestedUpdate = {
+    //   columns: newState.columns,
+    //   sessions: newState.sessions
+    // };
+    // setDoc(userRef, nestedUpdate);
+
+
     this.setState(newState);
+
   };
 
 
