@@ -35,7 +35,8 @@ export default class App extends React.Component {
 
     this.state = {
 
-      sessions: {},
+      sessions: {
+      },
 
       columns: {
         'column-1': {
@@ -43,14 +44,11 @@ export default class App extends React.Component {
           title: 'Ideas',
           sessionIds: [],
         },
-
       },
 
       columnOrder: ['column-1'],
       addSession: false,
       addColumn: false,
-      totalSessions: 2,
-      totalColumns: 1,
       columnName: '',
 
     };
@@ -69,11 +67,9 @@ export default class App extends React.Component {
       .then((snapshot) => {
 
         let userSessions = snapshot.data().sessions;
-        let totalSessions = Object.keys(userSessions).length;
-        
         let userColumns = snapshot.data().columns;
 
-        this.setState({ sessions: userSessions, columns: userColumns, totalSessions: totalSessions })
+        this.setState({ sessions: userSessions, columns: userColumns })
       })
       .catch(err => {
         console.log(err);
@@ -83,8 +79,8 @@ export default class App extends React.Component {
 
   submitSession(addedFrom, text) {
 
-    let newId = `session-${this.state.totalSessions + 1}`;
-    let newTotal = this.state.totalSessions + 1;
+    let nextId = Object.keys(this.state.sessions).length + 1;
+    let newId = `session-${nextId}`;
 
     let newSession = { id: newId, content: text, isHidden: false, date: Date.now() };
 
@@ -100,10 +96,8 @@ export default class App extends React.Component {
 
     let newState = {
       sessions: updatedSessions,
-      addSession: false,
       columns: currentColumns,
-      totalSessions: newTotal,
-      sessionIds: 'cheese'
+      addSession: false
     }
 
     let nestedUpdate = {};
@@ -112,7 +106,6 @@ export default class App extends React.Component {
     nestedUpdate['columns'] = currentColumns;
 
     setDoc(userRef, nestedUpdate);
-
     this.setState(newState);
   }
 
@@ -128,8 +121,9 @@ export default class App extends React.Component {
   submitColumn(e) {
     e.preventDefault();
 
-    let incrementCol = this.state.totalColumns + 1;
-    let newId = `column-${incrementCol}`;
+    let nextColumn = Object.keys(this.state.columns).length + 1;
+
+    let newId = `column-${nextColumn}`;
 
     let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
     let updatedColumns = this.state.columns;
@@ -137,8 +131,8 @@ export default class App extends React.Component {
 
     let updatedColumnOrder = this.state.columnOrder;
     updatedColumnOrder.push(newId);
-
-    this.setState({ addColumn: false, totalColumns: incrementCol });
+    //add and save columnorder in state?
+    this.setState({ addColumn: false });
   }
 
 
@@ -168,8 +162,9 @@ export default class App extends React.Component {
         columnOrder: newColumnOrder,
       };
 
-      //update columnorder in fb
+      setDoc(userRef, newState);
       this.setState(newState);
+
       return;
     }
 
@@ -185,6 +180,8 @@ export default class App extends React.Component {
         ...start,
         sessionIds: newSessionIds,
       };
+
+
       const newState = {
         ...this.state,
         columns: {
@@ -194,8 +191,9 @@ export default class App extends React.Component {
       };
 
 
-      
+      setDoc(userRef, newState);
       this.setState(newState);
+
       return;
     }
     
@@ -221,16 +219,8 @@ export default class App extends React.Component {
       },
     };
 
-    //tried to persist order but NewStart seems to be adding column order to columns and not a particular column...
-    // nestedUpdate = {
-    //   columns: newState.columns,
-    //   sessions: newState.sessions
-    // };
-    // setDoc(userRef, nestedUpdate);
-
-
+    setDoc(userRef, newState);
     this.setState(newState);
-
   };
 
 

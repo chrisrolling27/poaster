@@ -177,8 +177,6 @@ var App = /*#__PURE__*/function (_React$Component) {
       columnOrder: ['column-1'],
       addSession: false,
       addColumn: false,
-      totalSessions: 2,
-      totalColumns: 1,
       columnName: ''
     };
     _this.submitSession = _this.submitSession.bind(_babel_runtime_helpers_assertThisInitialized__WEBPACK_IMPORTED_MODULE_4___default()(_this));
@@ -196,13 +194,11 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
         var userSessions = snapshot.data().sessions;
-        var totalSessions = Object.keys(userSessions).length;
         var userColumns = snapshot.data().columns;
 
         _this2.setState({
           sessions: userSessions,
-          columns: userColumns,
-          totalSessions: totalSessions
+          columns: userColumns
         });
       })["catch"](function (err) {
         console.log(err);
@@ -211,8 +207,8 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
-      var newId = "session-".concat(this.state.totalSessions + 1);
-      var newTotal = this.state.totalSessions + 1;
+      var nextId = Object.keys(this.state.sessions).length + 1;
+      var newId = "session-".concat(nextId);
       var newSession = {
         id: newId,
         content: text,
@@ -227,10 +223,8 @@ var App = /*#__PURE__*/function (_React$Component) {
       currentColumns[addedFrom].sessionIds = newOrder;
       var newState = {
         sessions: updatedSessions,
-        addSession: false,
         columns: currentColumns,
-        totalSessions: newTotal,
-        sessionIds: 'cheese'
+        addSession: false
       };
       var nestedUpdate = {};
       nestedUpdate['sessions'] = updatedSessions;
@@ -256,8 +250,8 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitColumn",
     value: function submitColumn(e) {
       e.preventDefault();
-      var incrementCol = this.state.totalColumns + 1;
-      var newId = "column-".concat(incrementCol);
+      var nextColumn = Object.keys(this.state.columns).length + 1;
+      var newId = "column-".concat(nextColumn);
       var newColumn = {
         id: newId,
         title: this.state.columnName,
@@ -266,10 +260,10 @@ var App = /*#__PURE__*/function (_React$Component) {
       var updatedColumns = this.state.columns;
       updatedColumns[newId] = newColumn;
       var updatedColumnOrder = this.state.columnOrder;
-      updatedColumnOrder.push(newId);
+      updatedColumnOrder.push(newId); //add and save columnorder in state?
+
       this.setState({
-        addColumn: false,
-        totalColumns: incrementCol
+        addColumn: false
       });
     }
   }, {
@@ -297,9 +291,9 @@ var App = /*#__PURE__*/function (_React$Component) {
 
         var _newState = _objectSpread(_objectSpread({}, this.state), {}, {
           columnOrder: newColumnOrder
-        }); //update columnorder in fb
+        });
 
-
+        Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, _newState);
         this.setState(_newState);
         return;
       }
@@ -320,6 +314,7 @@ var App = /*#__PURE__*/function (_React$Component) {
           columns: _objectSpread(_objectSpread({}, this.state.columns), {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()({}, newColumn.id, newColumn))
         });
 
+        Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, _newState2);
         this.setState(_newState2);
         return;
       }
@@ -340,14 +335,9 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       var newState = _objectSpread(_objectSpread({}, this.state), {}, {
         columns: _objectSpread(_objectSpread({}, this.state.columns), {}, (_objectSpread3 = {}, _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()(_objectSpread3, newStart.id, newStart), _babel_runtime_helpers_defineProperty__WEBPACK_IMPORTED_MODULE_1___default()(_objectSpread3, newFinish.id, newFinish), _objectSpread3))
-      }); //tried to persist order but NewStart seems to be adding column order to columns and not a particular column...
-      // nestedUpdate = {
-      //   columns: newState.columns,
-      //   sessions: newState.sessions
-      // };
-      // setDoc(userRef, nestedUpdate);
+      });
 
-
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, newState);
       this.setState(newState);
     }
   }, {
