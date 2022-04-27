@@ -196,14 +196,13 @@ var App = /*#__PURE__*/function (_React$Component) {
 
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
         var userSessions = snapshot.data().sessions;
-        var userArray = Object.keys(userSessions);
+        var totalSessions = Object.keys(userSessions).length;
         var userColumns = snapshot.data().columns;
-        userColumns['sessionIds'] = userArray;
 
         _this2.setState({
           sessions: userSessions,
           columns: userColumns,
-          totalSessions: userArray.length
+          totalSessions: totalSessions
         });
       })["catch"](function (err) {
         console.log(err);
@@ -230,7 +229,8 @@ var App = /*#__PURE__*/function (_React$Component) {
         sessions: updatedSessions,
         addSession: false,
         columns: currentColumns,
-        totalSessions: newTotal
+        totalSessions: newTotal,
+        sessionIds: 'cheese'
       };
       var nestedUpdate = {};
       nestedUpdate['sessions'] = updatedSessions;
@@ -297,7 +297,8 @@ var App = /*#__PURE__*/function (_React$Component) {
 
         var _newState = _objectSpread(_objectSpread({}, this.state), {}, {
           columnOrder: newColumnOrder
-        });
+        }); //update columnorder in fb
+
 
         this.setState(_newState);
         return;

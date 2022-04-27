@@ -42,7 +42,7 @@ export default class App extends React.Component {
           id: 'column-1',
           title: 'Ideas',
           sessionIds: [],
-        }
+        },
 
       },
 
@@ -69,13 +69,11 @@ export default class App extends React.Component {
       .then((snapshot) => {
 
         let userSessions = snapshot.data().sessions;
-        let userArray = Object.keys(userSessions);
-
+        let totalSessions = Object.keys(userSessions).length;
+        
         let userColumns = snapshot.data().columns;
 
-        userColumns['sessionIds'] = userArray;
-
-        this.setState({ sessions: userSessions, columns: userColumns, totalSessions: userArray.length })
+        this.setState({ sessions: userSessions, columns: userColumns, totalSessions: totalSessions })
       })
       .catch(err => {
         console.log(err);
@@ -104,10 +102,12 @@ export default class App extends React.Component {
       sessions: updatedSessions,
       addSession: false,
       columns: currentColumns,
-      totalSessions: newTotal
+      totalSessions: newTotal,
+      sessionIds: 'cheese'
     }
 
     let nestedUpdate = {};
+    
     nestedUpdate['sessions'] = updatedSessions;
     nestedUpdate['columns'] = currentColumns;
 
@@ -167,6 +167,8 @@ export default class App extends React.Component {
         ...this.state,
         columnOrder: newColumnOrder,
       };
+
+      //update columnorder in fb
       this.setState(newState);
       return;
     }
@@ -190,6 +192,9 @@ export default class App extends React.Component {
           [newColumn.id]: newColumn,
         },
       };
+
+
+      
       this.setState(newState);
       return;
     }
