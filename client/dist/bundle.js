@@ -167,14 +167,8 @@ var App = /*#__PURE__*/function (_React$Component) {
     _this = _super.call(this, props);
     _this.state = {
       sessions: {},
-      columns: {
-        'column-1': {
-          id: 'column-1',
-          title: 'Ideas',
-          sessionIds: []
-        }
-      },
-      columnOrder: ['column-1'],
+      columns: {},
+      columnOrder: [],
       addSession: false,
       addColumn: false,
       columnName: ''

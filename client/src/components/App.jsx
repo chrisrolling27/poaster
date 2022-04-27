@@ -35,18 +35,9 @@ export default class App extends React.Component {
 
     this.state = {
 
-      sessions: {
-      },
-
-      columns: {
-        'column-1': {
-          id: 'column-1',
-          title: 'Ideas',
-          sessionIds: [],
-        },
-      },
-
-      columnOrder: ['column-1'],
+      sessions: {},
+      columns: {},
+      columnOrder: [],
       addSession: false,
       addColumn: false,
       columnName: '',
@@ -101,7 +92,7 @@ export default class App extends React.Component {
     }
 
     let nestedUpdate = {};
-    
+
     nestedUpdate['sessions'] = updatedSessions;
     nestedUpdate['columns'] = currentColumns;
 
@@ -196,7 +187,7 @@ export default class App extends React.Component {
 
       return;
     }
-    
+
     const startSessionIds = Array.from(start.sessionIds);
     startSessionIds.splice(source.index, 1);
     const newStart = {
@@ -242,6 +233,7 @@ export default class App extends React.Component {
                 {...provided.droppableProps}
                 ref={provided.innerRef}
               >
+
                 {this.state.columnOrder.map((columnId, index) => {
                   const column = this.state.columns[columnId];
                   const sessions = column.sessionIds.map(sessionId => this.state.sessions[sessionId]);
@@ -251,9 +243,10 @@ export default class App extends React.Component {
                     submitSession={this.submitSession}
                     sessions={sessions}
                     index={index}
-
                   />;
                 })}
+
+
                 {provided.placeholder}
               </Container>
             )}
