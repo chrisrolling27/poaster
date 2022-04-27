@@ -4,29 +4,21 @@ import Column from './Column.jsx';
 import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, collection, doc, query, where, getDoc, getDocs, updateDoc, addDoc, Timestamp, setDoc } from 'firebase/firestore';
+import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
 
 const Container = styled.div`
 display: flex;
 `;
-
 const FormContainer = styled.div`
   paddings: 8px; 
 `;
-
-
 const AddColumnButton = styled.button`
-
 background-color: red;
-
 `;
-
 const AddForm = styled.form`
-
 background-color: green;
 value: please;
 `;
-
 
 export default class App extends React.Component {
 
@@ -122,11 +114,11 @@ export default class App extends React.Component {
     } else {
       var nextColumn = Object.keys(this.state.columns).length + 1;
     }
-    
+
     let newId = `column-${nextColumn}`;
 
     let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
-    
+
     if (nextColumn === 1) {
       var updatedColumns = {};
     } else {
