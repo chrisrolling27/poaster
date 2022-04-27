@@ -59,8 +59,9 @@ export default class App extends React.Component {
 
         let userSessions = snapshot.data().sessions;
         let userColumns = snapshot.data().columns;
+        let columnOrder = snapshot.data().columnOrder || [];
 
-        this.setState({ sessions: userSessions, columns: userColumns })
+        this.setState({ sessions: userSessions, columns: userColumns, columnOrder: columnOrder })
       })
       .catch(err => {
         console.log(err);
@@ -70,12 +71,16 @@ export default class App extends React.Component {
 
   submitSession(addedFrom, text) {
 
-    let nextId = Object.keys(this.state.sessions).length + 1;
+    if (Object.keys(this.state.sessions || {}).length === 0) {
+      var nextId = 1;
+    } else {
+      var nextId = Object.keys(this.state.sessions).length + 1;
+    }
     let newId = `session-${nextId}`;
 
     let newSession = { id: newId, content: text, isHidden: false, date: Date.now() };
 
-    let updatedSessions = this.state.sessions;
+    let updatedSessions = this.state.sessions || {};
     updatedSessions[newId] = newSession;
 
     let currentColumns = this.state.columns;
@@ -112,18 +117,35 @@ export default class App extends React.Component {
   submitColumn(e) {
     e.preventDefault();
 
-    let nextColumn = Object.keys(this.state.columns).length + 1;
-
+    if (Object.keys(this.state.columns || {}).length === 0) {
+      var nextColumn = 1;
+    } else {
+      var nextColumn = Object.keys(this.state.columns).length + 1;
+    }
+    
     let newId = `column-${nextColumn}`;
 
     let newColumn = { id: newId, title: this.state.columnName, sessionIds: [] };
-    let updatedColumns = this.state.columns;
+    
+    if (nextColumn === 1) {
+      var updatedColumns = {};
+    } else {
+      var updatedColumns = this.state.columns;
+    }
+
     updatedColumns[newId] = newColumn;
 
     let updatedColumnOrder = this.state.columnOrder;
     updatedColumnOrder.push(newId);
-    //add and save columnorder in state?
-    this.setState({ addColumn: false });
+
+    const newState = {
+      columns: updatedColumns,
+      columnOrder: updatedColumnOrder,
+      addColumn: false
+    };
+
+    setDoc(userRef, newState);
+    this.setState(newState);
   }
 
 

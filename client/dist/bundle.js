@@ -189,10 +189,12 @@ var App = /*#__PURE__*/function (_React$Component) {
       Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getDoc"])(userRef).then(function (snapshot) {
         var userSessions = snapshot.data().sessions;
         var userColumns = snapshot.data().columns;
+        var columnOrder = snapshot.data().columnOrder || [];
 
         _this2.setState({
           sessions: userSessions,
-          columns: userColumns
+          columns: userColumns,
+          columnOrder: columnOrder
         });
       })["catch"](function (err) {
         console.log(err);
@@ -201,7 +203,12 @@ var App = /*#__PURE__*/function (_React$Component) {
   }, {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
-      var nextId = Object.keys(this.state.sessions).length + 1;
+      if (Object.keys(this.state.sessions || {}).length === 0) {
+        var nextId = 1;
+      } else {
+        var nextId = Object.keys(this.state.sessions).length + 1;
+      }
+
       var newId = "session-".concat(nextId);
       var newSession = {
         id: newId,
@@ -209,7 +216,7 @@ var App = /*#__PURE__*/function (_React$Component) {
         isHidden: false,
         date: Date.now()
       };
-      var updatedSessions = this.state.sessions;
+      var updatedSessions = this.state.sessions || {};
       updatedSessions[newId] = newSession;
       var currentColumns = this.state.columns;
       var newOrder = Array.from(currentColumns[addedFrom].sessionIds);
@@ -244,21 +251,36 @@ var App = /*#__PURE__*/function (_React$Component) {
     key: "submitColumn",
     value: function submitColumn(e) {
       e.preventDefault();
-      var nextColumn = Object.keys(this.state.columns).length + 1;
+
+      if (Object.keys(this.state.columns || {}).length === 0) {
+        var nextColumn = 1;
+      } else {
+        var nextColumn = Object.keys(this.state.columns).length + 1;
+      }
+
       var newId = "column-".concat(nextColumn);
       var newColumn = {
         id: newId,
         title: this.state.columnName,
         sessionIds: []
       };
-      var updatedColumns = this.state.columns;
+
+      if (nextColumn === 1) {
+        var updatedColumns = {};
+      } else {
+        var updatedColumns = this.state.columns;
+      }
+
       updatedColumns[newId] = newColumn;
       var updatedColumnOrder = this.state.columnOrder;
-      updatedColumnOrder.push(newId); //add and save columnorder in state?
-
-      this.setState({
+      updatedColumnOrder.push(newId);
+      var newState = {
+        columns: updatedColumns,
+        columnOrder: updatedColumnOrder,
         addColumn: false
-      });
+      };
+      Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["setDoc"])(userRef, newState);
+      this.setState(newState);
     }
   }, {
     key: "onDragEnd",
