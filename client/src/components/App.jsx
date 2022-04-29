@@ -15,10 +15,6 @@ const FormContainer = styled.div`
 const AddColumnButton = styled.button`
 background-color: red;
 `;
-const AddForm = styled.form`
-background-color: green;
-value: please;
-`;
 
 export default class App extends React.Component {
 
@@ -42,7 +38,6 @@ export default class App extends React.Component {
     this.onDragEnd = this.onDragEnd.bind(this);
     this.handleChange = this.handleChange.bind(this);
   }
-
 
   componentDidMount() {
 
