@@ -16,21 +16,28 @@ const AddColumnButton = styled.button`
 background-color: red;
 `;
 
+let orig = {
+
+  sessions: {},
+  columns: {},
+  columnOrder: [],
+  addSession: false,
+  addColumn: false,
+  columnName: '',
+
+};
+
+
+
 export default class App extends React.Component {
 
   constructor(props) {
     super(props);
 
-    this.state = {
-
-      sessions: {},
-      columns: {},
-      columnOrder: [],
-      addSession: false,
-      addColumn: false,
-      columnName: '',
-
-    };
+    this.state = JSON.parse(
+      window.localStorage.getItem('mysakey')
+    ) || orig;
+  
 
     this.submitSession = this.submitSession.bind(this);
     this.makeColumn = this.makeColumn.bind(this);
@@ -41,18 +48,21 @@ export default class App extends React.Component {
 
   componentDidMount() {
 
-    getDoc(userRef)
-      .then((snapshot) => {
+    console.log(window.localStorage.getItem('mysakey'));
 
-        let userSessions = snapshot.data().sessions;
-        let userColumns = snapshot.data().columns;
-        let columnOrder = snapshot.data().columnOrder || [];
 
-        this.setState({ sessions: userSessions, columns: userColumns, columnOrder: columnOrder })
-      })
-      .catch(err => {
-        console.log(err);
-      })
+    // getDoc(userRef)
+    //   .then((snapshot) => {
+
+    //     let userSessions = snapshot.data().sessions;
+    //     let userColumns = snapshot.data().columns;
+    //     let columnOrder = snapshot.data().columnOrder || [];
+
+    //     this.setState({ sessions: userSessions, columns: userColumns, columnOrder: columnOrder })
+    //   })
+    //   .catch(err => {
+    //     console.log(err);
+    //   })
   }
 
   componentDidUpdate() {
@@ -94,7 +104,7 @@ export default class App extends React.Component {
     nestedUpdate['sessions'] = updatedSessions;
     nestedUpdate['columns'] = currentColumns;
 
-    setDoc(userRef, nestedUpdate);
+    //setDoc(userRef, nestedUpdate);
     this.setState(newState);
   }
 
@@ -137,7 +147,7 @@ export default class App extends React.Component {
       addColumn: false
     };
 
-    setDoc(userRef, newState);
+    //setDoc(userRef, newState);
     this.setState(newState);
   }
 
@@ -197,7 +207,7 @@ export default class App extends React.Component {
       };
 
 
-      setDoc(userRef, newState);
+      //setDoc(userRef, newState);
       this.setState(newState);
 
       return;
@@ -225,7 +235,7 @@ export default class App extends React.Component {
       },
     };
 
-    setDoc(userRef, newState);
+    //setDoc(userRef, newState);
     this.setState(newState);
   };
 
@@ -288,6 +298,6 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 //test dummy user
-const userRef = doc(db, "userDocs", "UGkjikltZYXeHCealI7i");
+const userRef = doc(db, "userDocs", "eiiXq5FO1dFPa0WJlff0");
 
 
