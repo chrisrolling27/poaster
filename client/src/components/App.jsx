@@ -4,7 +4,7 @@ import Column from './Column.jsx';
 import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { getFirestore, addDoc, query, collection, where, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 
 const Container = styled.div`
 display: flex;
@@ -55,6 +55,12 @@ export default class App extends React.Component {
       })
   }
 
+  componentDidUpdate() {
+    window.localStorage.setItem(
+      'mysakey',
+      JSON.stringify(this.state)
+    );
+  }
 
   submitSession(addedFrom, text) {
 
@@ -226,7 +232,7 @@ export default class App extends React.Component {
 
   render() {
     return (
-      <div>
+      <div className="app">
         <DragDropContext
           onDragStart={this.onDragStart}
           onDragEnd={this.onDragEnd}
@@ -281,6 +287,7 @@ export default class App extends React.Component {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
+//test dummy user
 const userRef = doc(db, "userDocs", "UGkjikltZYXeHCealI7i");
 
 

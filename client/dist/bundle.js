@@ -200,6 +200,11 @@ var App = /*#__PURE__*/function (_React$Component) {
       });
     }
   }, {
+    key: "componentDidUpdate",
+    value: function componentDidUpdate() {
+      window.localStorage.setItem('mysakey', JSON.stringify(this.state));
+    }
+  }, {
     key: "submitSession",
     value: function submitSession(addedFrom, text) {
       if (Object.keys(this.state.sessions || {}).length === 0) {
@@ -360,7 +365,9 @@ var App = /*#__PURE__*/function (_React$Component) {
     value: function render() {
       var _this3 = this;
 
-      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", null, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__["DragDropContext"], {
+      return /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement("div", {
+        className: "app"
+      }, /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_9___default.a.createElement(react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__["DragDropContext"], {
         onDragStart: this.onDragStart,
         onDragEnd: this.onDragEnd,
         onDragUpdate: this.onDragUpdate
@@ -407,7 +414,8 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 
 var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
-var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app);
+var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app); //test dummy user
+
 var userRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "userDocs", "UGkjikltZYXeHCealI7i");
 
 /***/ }),
@@ -553,6 +561,7 @@ var Column = /*#__PURE__*/function (_React$Component) {
           onChange: _this2.handleChange
         }), /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement("input", {
           type: "submit",
+          background: true,
           value: "Submit!"
         })) : /*#__PURE__*/react__WEBPACK_IMPORTED_MODULE_8___default.a.createElement(AddCardButton, {
           onClick: function onClick() {
