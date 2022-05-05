@@ -6,6 +6,7 @@ import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, addDoc, query, collection, where, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
 
+
 const Container = styled.div`
 display: flex;
 `;
@@ -13,7 +14,16 @@ const FormContainer = styled.div`
   paddings: 8px; 
 `;
 const AddColumnButton = styled.button`
-background-color: red;
+color: tomato;
+  border-color: tomato;
+  display: inline-block;
+  color: palevioletred;
+  font-size: 1em;
+  margin: 1em;
+  padding: 0.25em 1em;
+  border: 2px solid palevioletred;
+  border-radius: 3px;
+  display: block;
 `;
 
 let orig = {
