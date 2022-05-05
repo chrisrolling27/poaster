@@ -1956,7 +1956,7 @@ function isVersionServiceProvider(provider) {
 }
 
 const name$o = "@firebase/app";
-const version$1 = "0.7.22";
+const version$1 = "0.7.17";
 
 /**
  * @license
@@ -2023,7 +2023,7 @@ const name$2 = "@firebase/firestore";
 const name$1 = "@firebase/firestore-compat";
 
 const name = "firebase";
-const version = "9.7.0";
+const version = "9.6.7";
 
 /**
  * @license
@@ -2153,12 +2153,6 @@ function _registerComponent(component) {
  * @internal
  */
 function _getProvider(app, name) {
-    const heartbeatController = app.container
-        .getProvider('heartbeat')
-        .getImmediate({ optional: true });
-    if (heartbeatController) {
-        void heartbeatController.triggerHeartbeat();
-    }
     return app.container.getProvider(name);
 }
 /**
@@ -2205,11 +2199,7 @@ const ERRORS = {
     ["app-deleted" /* APP_DELETED */]: "Firebase App named '{$appName}' already deleted",
     ["invalid-app-argument" /* INVALID_APP_ARGUMENT */]: 'firebase.{$appName}() takes either no argument or a ' +
         'Firebase App instance.',
-    ["invalid-log-argument" /* INVALID_LOG_ARGUMENT */]: 'First argument to `onLog` must be null or a function.',
-    ["storage-open" /* STORAGE_OPEN */]: 'Error thrown when opening storage. Original error: {$originalErrorMessage}.',
-    ["storage-get" /* STORAGE_GET */]: 'Error thrown when reading from storage. Original error: {$originalErrorMessage}.',
-    ["storage-set" /* STORAGE_WRITE */]: 'Error thrown when writing to storage. Original error: {$originalErrorMessage}.',
-    ["storage-delete" /* STORAGE_DELETE */]: 'Error thrown when deleting from storage. Original error: {$originalErrorMessage}.'
+    ["invalid-log-argument" /* INVALID_LOG_ARGUMENT */]: 'First argument to `onLog` must be null or a function.'
 };
 const ERROR_FACTORY = new _firebase_util__WEBPACK_IMPORTED_MODULE_2__["ErrorFactory"]('app', 'Firebase', ERRORS);
 
@@ -2467,310 +2457,6 @@ function setLogLevel(logLevel) {
 
 /**
  * @license
- * Copyright 2021 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-const DB_NAME = 'firebase-heartbeat-database';
-const DB_VERSION = 1;
-const STORE_NAME = 'firebase-heartbeat-store';
-let dbPromise = null;
-function getDbPromise() {
-    if (!dbPromise) {
-        dbPromise = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_2__["openDB"])(DB_NAME, DB_VERSION, (db, oldVersion) => {
-            // We don't use 'break' in this switch statement, the fall-through
-            // behavior is what we want, because if there are multiple versions between
-            // the old version and the current version, we want ALL the migrations
-            // that correspond to those versions to run, not only the last one.
-            // eslint-disable-next-line default-case
-            switch (oldVersion) {
-                case 0:
-                    db.createObjectStore(STORE_NAME);
-            }
-        }).catch(e => {
-            throw ERROR_FACTORY.create("storage-open" /* STORAGE_OPEN */, {
-                originalErrorMessage: e.message
-            });
-        });
-    }
-    return dbPromise;
-}
-async function readHeartbeatsFromIndexedDB(app) {
-    try {
-        const db = await getDbPromise();
-        return db
-            .transaction(STORE_NAME)
-            .objectStore(STORE_NAME)
-            .get(computeKey(app));
-    }
-    catch (e) {
-        throw ERROR_FACTORY.create("storage-get" /* STORAGE_GET */, {
-            originalErrorMessage: e.message
-        });
-    }
-}
-async function writeHeartbeatsToIndexedDB(app, heartbeatObject) {
-    try {
-        const db = await getDbPromise();
-        const tx = db.transaction(STORE_NAME, 'readwrite');
-        const objectStore = tx.objectStore(STORE_NAME);
-        await objectStore.put(heartbeatObject, computeKey(app));
-        return tx.complete;
-    }
-    catch (e) {
-        throw ERROR_FACTORY.create("storage-set" /* STORAGE_WRITE */, {
-            originalErrorMessage: e.message
-        });
-    }
-}
-function computeKey(app) {
-    return `${app.name}!${app.options.appId}`;
-}
-
-/**
- * @license
- * Copyright 2021 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-const MAX_HEADER_BYTES = 1024;
-// 30 days
-const STORED_HEARTBEAT_RETENTION_MAX_MILLIS = 30 * 24 * 60 * 60 * 1000;
-class HeartbeatServiceImpl {
-    constructor(container) {
-        this.container = container;
-        /**
-         * In-memory cache for heartbeats, used by getHeartbeatsHeader() to generate
-         * the header string.
-         * Stores one record per date. This will be consolidated into the standard
-         * format of one record per user agent string before being sent as a header.
-         * Populated from indexedDB when the controller is instantiated and should
-         * be kept in sync with indexedDB.
-         * Leave public for easier testing.
-         */
-        this._heartbeatsCache = null;
-        const app = this.container.getProvider('app').getImmediate();
-        this._storage = new HeartbeatStorageImpl(app);
-        this._heartbeatsCachePromise = this._storage.read().then(result => {
-            this._heartbeatsCache = result;
-            return result;
-        });
-    }
-    /**
-     * Called to report a heartbeat. The function will generate
-     * a HeartbeatsByUserAgent object, update heartbeatsCache, and persist it
-     * to IndexedDB.
-     * Note that we only store one heartbeat per day. So if a heartbeat for today is
-     * already logged, subsequent calls to this function in the same day will be ignored.
-     */
-    async triggerHeartbeat() {
-        const platformLogger = this.container
-            .getProvider('platform-logger')
-            .getImmediate();
-        // This is the "Firebase user agent" string from the platform logger
-        // service, not the browser user agent.
-        const agent = platformLogger.getPlatformInfoString();
-        const date = getUTCDateString();
-        if (this._heartbeatsCache === null) {
-            this._heartbeatsCache = await this._heartbeatsCachePromise;
-        }
-        // Do not store a heartbeat if one is already stored for this day
-        // or if a header has already been sent today.
-        if (this._heartbeatsCache.lastSentHeartbeatDate === date ||
-            this._heartbeatsCache.heartbeats.some(singleDateHeartbeat => singleDateHeartbeat.date === date)) {
-            return;
-        }
-        else {
-            // There is no entry for this date. Create one.
-            this._heartbeatsCache.heartbeats.push({ date, agent });
-        }
-        // Remove entries older than 30 days.
-        this._heartbeatsCache.heartbeats = this._heartbeatsCache.heartbeats.filter(singleDateHeartbeat => {
-            const hbTimestamp = new Date(singleDateHeartbeat.date).valueOf();
-            const now = Date.now();
-            return now - hbTimestamp <= STORED_HEARTBEAT_RETENTION_MAX_MILLIS;
-        });
-        return this._storage.overwrite(this._heartbeatsCache);
-    }
-    /**
-     * Returns a base64 encoded string which can be attached to the heartbeat-specific header directly.
-     * It also clears all heartbeats from memory as well as in IndexedDB.
-     *
-     * NOTE: Consuming product SDKs should not send the header if this method
-     * returns an empty string.
-     */
-    async getHeartbeatsHeader() {
-        if (this._heartbeatsCache === null) {
-            await this._heartbeatsCachePromise;
-        }
-        // If it's still null or the array is empty, there is no data to send.
-        if (this._heartbeatsCache === null ||
-            this._heartbeatsCache.heartbeats.length === 0) {
-            return '';
-        }
-        const date = getUTCDateString();
-        // Extract as many heartbeats from the cache as will fit under the size limit.
-        const { heartbeatsToSend, unsentEntries } = extractHeartbeatsForHeader(this._heartbeatsCache.heartbeats);
-        const headerString = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_2__["base64urlEncodeWithoutPadding"])(JSON.stringify({ version: 2, heartbeats: heartbeatsToSend }));
-        // Store last sent date to prevent another being logged/sent for the same day.
-        this._heartbeatsCache.lastSentHeartbeatDate = date;
-        if (unsentEntries.length > 0) {
-            // Store any unsent entries if they exist.
-            this._heartbeatsCache.heartbeats = unsentEntries;
-            // This seems more likely than emptying the array (below) to lead to some odd state
-            // since the cache isn't empty and this will be called again on the next request,
-            // and is probably safest if we await it.
-            await this._storage.overwrite(this._heartbeatsCache);
-        }
-        else {
-            this._heartbeatsCache.heartbeats = [];
-            // Do not wait for this, to reduce latency.
-            void this._storage.overwrite(this._heartbeatsCache);
-        }
-        return headerString;
-    }
-}
-function getUTCDateString() {
-    const today = new Date();
-    // Returns date format 'YYYY-MM-DD'
-    return today.toISOString().substring(0, 10);
-}
-function extractHeartbeatsForHeader(heartbeatsCache, maxSize = MAX_HEADER_BYTES) {
-    // Heartbeats grouped by user agent in the standard format to be sent in
-    // the header.
-    const heartbeatsToSend = [];
-    // Single date format heartbeats that are not sent.
-    let unsentEntries = heartbeatsCache.slice();
-    for (const singleDateHeartbeat of heartbeatsCache) {
-        // Look for an existing entry with the same user agent.
-        const heartbeatEntry = heartbeatsToSend.find(hb => hb.agent === singleDateHeartbeat.agent);
-        if (!heartbeatEntry) {
-            // If no entry for this user agent exists, create one.
-            heartbeatsToSend.push({
-                agent: singleDateHeartbeat.agent,
-                dates: [singleDateHeartbeat.date]
-            });
-            if (countBytes(heartbeatsToSend) > maxSize) {
-                // If the header would exceed max size, remove the added heartbeat
-                // entry and stop adding to the header.
-                heartbeatsToSend.pop();
-                break;
-            }
-        }
-        else {
-            heartbeatEntry.dates.push(singleDateHeartbeat.date);
-            // If the header would exceed max size, remove the added date
-            // and stop adding to the header.
-            if (countBytes(heartbeatsToSend) > maxSize) {
-                heartbeatEntry.dates.pop();
-                break;
-            }
-        }
-        // Pop unsent entry from queue. (Skipped if adding the entry exceeded
-        // quota and the loop breaks early.)
-        unsentEntries = unsentEntries.slice(1);
-    }
-    return {
-        heartbeatsToSend,
-        unsentEntries
-    };
-}
-class HeartbeatStorageImpl {
-    constructor(app) {
-        this.app = app;
-        this._canUseIndexedDBPromise = this.runIndexedDBEnvironmentCheck();
-    }
-    async runIndexedDBEnvironmentCheck() {
-        if (!Object(_firebase_util__WEBPACK_IMPORTED_MODULE_2__["isIndexedDBAvailable"])()) {
-            return false;
-        }
-        else {
-            return Object(_firebase_util__WEBPACK_IMPORTED_MODULE_2__["validateIndexedDBOpenable"])()
-                .then(() => true)
-                .catch(() => false);
-        }
-    }
-    /**
-     * Read all heartbeats.
-     */
-    async read() {
-        const canUseIndexedDB = await this._canUseIndexedDBPromise;
-        if (!canUseIndexedDB) {
-            return { heartbeats: [] };
-        }
-        else {
-            const idbHeartbeatObject = await readHeartbeatsFromIndexedDB(this.app);
-            return idbHeartbeatObject || { heartbeats: [] };
-        }
-    }
-    // overwrite the storage with the provided heartbeats
-    async overwrite(heartbeatsObject) {
-        var _a;
-        const canUseIndexedDB = await this._canUseIndexedDBPromise;
-        if (!canUseIndexedDB) {
-            return;
-        }
-        else {
-            const existingHeartbeatsObject = await this.read();
-            return writeHeartbeatsToIndexedDB(this.app, {
-                lastSentHeartbeatDate: (_a = heartbeatsObject.lastSentHeartbeatDate) !== null && _a !== void 0 ? _a : existingHeartbeatsObject.lastSentHeartbeatDate,
-                heartbeats: heartbeatsObject.heartbeats
-            });
-        }
-    }
-    // add heartbeats
-    async add(heartbeatsObject) {
-        var _a;
-        const canUseIndexedDB = await this._canUseIndexedDBPromise;
-        if (!canUseIndexedDB) {
-            return;
-        }
-        else {
-            const existingHeartbeatsObject = await this.read();
-            return writeHeartbeatsToIndexedDB(this.app, {
-                lastSentHeartbeatDate: (_a = heartbeatsObject.lastSentHeartbeatDate) !== null && _a !== void 0 ? _a : existingHeartbeatsObject.lastSentHeartbeatDate,
-                heartbeats: [
-                    ...existingHeartbeatsObject.heartbeats,
-                    ...heartbeatsObject.heartbeats
-                ]
-            });
-        }
-    }
-}
-/**
- * Calculate bytes of a HeartbeatsByUserAgent array after being wrapped
- * in a platform logging header JSON object, stringified, and converted
- * to base 64.
- */
-function countBytes(heartbeatsCache) {
-    // base64 has a restricted set of characters, all of which should be 1 byte.
-    return Object(_firebase_util__WEBPACK_IMPORTED_MODULE_2__["base64urlEncodeWithoutPadding"])(
-    // heartbeatsCache wrapper properties
-    JSON.stringify({ version: 2, heartbeats: heartbeatsCache })).length;
-}
-
-/**
- * @license
  * Copyright 2019 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -2787,7 +2473,6 @@ function countBytes(heartbeatsCache) {
  */
 function registerCoreComponents(variant) {
     _registerComponent(new _firebase_component__WEBPACK_IMPORTED_MODULE_0__["Component"]('platform-logger', container => new PlatformLoggerServiceImpl(container), "PRIVATE" /* PRIVATE */));
-    _registerComponent(new _firebase_component__WEBPACK_IMPORTED_MODULE_0__["Component"]('heartbeat', container => new HeartbeatServiceImpl(container), "PRIVATE" /* PRIVATE */));
     // Register `app` package.
     registerVersion(name$o, version$1, variant);
     // BUILD_TARGET will be replaced by values like esm5, esm2017, cjs5, etc during the compilation
@@ -3245,87 +2930,87 @@ class ComponentContainer {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(process) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "AbstractUserDataWriter", function() { return Jh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Bytes", function() { return jc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CACHE_SIZE_UNLIMITED", function() { return Vc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CollectionReference", function() { return yc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DocumentReference", function() { return mc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DocumentSnapshot", function() { return Ph; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FieldPath", function() { return Gc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FieldValue", function() { return Wc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Firestore", function() { return vc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FirestoreError", function() { return Q; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "GeoPoint", function() { return zc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "LoadBundleTask", function() { return bc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Query", function() { return gc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QueryConstraint", function() { return Ch; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QueryDocumentSnapshot", function() { return bh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QuerySnapshot", function() { return Vh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SnapshotMetadata", function() { return Rh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Timestamp", function() { return at; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Transaction", function() { return ml; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "WriteBatch", function() { return Zh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DatabaseId", function() { return vt; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DocumentKey", function() { return xt; });
+/* WEBPACK VAR INJECTION */(function(process) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "AbstractUserDataWriter", function() { return xh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Bytes", function() { return Sa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CACHE_SIZE_UNLIMITED", function() { return ha; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CollectionReference", function() { return ea; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DocumentReference", function() { return Zu; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DocumentSnapshot", function() { return uh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FieldPath", function() { return va; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FieldValue", function() { return Da; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Firestore", function() { return la; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FirestoreError", function() { return j; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "GeoPoint", function() { return Ca; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "LoadBundleTask", function() { return aa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Query", function() { return ta; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QueryConstraint", function() { return _h; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QueryDocumentSnapshot", function() { return ah; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "QuerySnapshot", function() { return hh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "SnapshotMetadata", function() { return ch; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Timestamp", function() { return ut; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Transaction", function() { return Zh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "WriteBatch", function() { return Mh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DatabaseId", function() { return Vt; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DocumentKey", function() { return Nt; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_EmptyAppCheckTokenProvider", function() { return et; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_EmptyAuthCredentialsProvider", function() { return z; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_FieldPath", function() { return mt; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_cast", function() { return lc; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_cast", function() { return zu; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_debugAssert", function() { return q; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_isBase64Available", function() { return yt; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_logWarn", function() { return $; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_setIndexConfiguration", function() { return Rl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_validateIsNotUsedTogether", function() { return uc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "addDoc", function() { return ll; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "arrayRemove", function() { return Tl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "arrayUnion", function() { return Il; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "clearIndexedDbPersistence", function() { return Oc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "collection", function() { return pc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "collectionGroup", function() { return Ic; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "connectFirestoreEmulator", function() { return wc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deleteDoc", function() { return hl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deleteField", function() { return yl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "disableNetwork", function() { return Bc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "doc", function() { return Tc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "documentId", function() { return Qc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableIndexedDbPersistence", function() { return Nc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableMultiTabIndexedDbPersistence", function() { return kc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableNetwork", function() { return $c; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "endAt", function() { return Qh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "endBefore", function() { return Gh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ensureFirestoreConfigured", function() { return Cc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "executeWrite", function() { return _l; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDoc", function() { return el; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocFromCache", function() { return sl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocFromServer", function() { return il; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocs", function() { return rl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocsFromCache", function() { return ol; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocsFromServer", function() { return ul; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getFirestore", function() { return Dc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "increment", function() { return El; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "initializeFirestore", function() { return Sc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "limit", function() { return $h; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "limitToLast", function() { return Bh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "loadBundle", function() { return Uc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "namedQuery", function() { return qc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "onSnapshot", function() { return fl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "onSnapshotsInSync", function() { return dl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "orderBy", function() { return Oh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "query", function() { return xh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "queryEqual", function() { return Ac; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "refEqual", function() { return Ec; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "runTransaction", function() { return gl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "serverTimestamp", function() { return pl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "setDoc", function() { return al; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "setLogLevel", function() { return M; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "snapshotEqual", function() { return Sh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "startAfter", function() { return qh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "startAt", function() { return Uh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "terminate", function() { return Lc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "updateDoc", function() { return cl; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "waitForPendingWrites", function() { return Fc; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "where", function() { return kh; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "writeBatch", function() { return Al; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_logWarn", function() { return F; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_setIndexConfiguration", function() { return cl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_validateIsNotUsedTogether", function() { return Gu; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "addDoc", function() { return zh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "arrayRemove", function() { return il; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "arrayUnion", function() { return sl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "clearIndexedDbPersistence", function() { return pa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "collection", function() { return na; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "collectionGroup", function() { return sa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "connectFirestoreEmulator", function() { return Xu; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deleteDoc", function() { return Wh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deleteField", function() { return el; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "disableNetwork", function() { return Ta; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "doc", function() { return ia; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "documentId", function() { return Va; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableIndexedDbPersistence", function() { return ma; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableMultiTabIndexedDbPersistence", function() { return ga; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "enableNetwork", function() { return Ea; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "endAt", function() { return Vh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "endBefore", function() { return vh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ensureFirestoreConfigured", function() { return _a; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "executeWrite", function() { return Yh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDoc", function() { return Fh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocFromCache", function() { return Lh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocFromServer", function() { return Uh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocs", function() { return qh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocsFromCache", function() { return Kh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getDocsFromServer", function() { return Gh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getFirestore", function() { return da; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "increment", function() { return rl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "initializeFirestore", function() { return fa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "limit", function() { return Eh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "limitToLast", function() { return Th; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "loadBundle", function() { return Ra; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "namedQuery", function() { return Pa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "onSnapshot", function() { return Hh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "onSnapshotsInSync", function() { return Jh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "orderBy", function() { return ph; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "query", function() { return wh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "queryEqual", function() { return oa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "refEqual", function() { return ra; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "runTransaction", function() { return tl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "serverTimestamp", function() { return nl; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "setDoc", function() { return jh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "setLogLevel", function() { return O; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "snapshotEqual", function() { return fh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "startAfter", function() { return Ph; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "startAt", function() { return Rh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "terminate", function() { return Aa; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "updateDoc", function() { return Qh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "waitForPendingWrites", function() { return Ia; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "where", function() { return gh; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "writeBatch", function() { return ol; });
 /* harmony import */ var _firebase_app__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! @firebase/app */ "./node_modules/@firebase/app/dist/esm/index.esm2017.js");
 /* harmony import */ var _firebase_component__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! @firebase/component */ "./node_modules/@firebase/component/dist/esm/index.esm2017.js");
 /* harmony import */ var _firebase_logger__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(/*! @firebase/logger */ "./node_modules/@firebase/logger/dist/esm/index.esm2017.js");
@@ -3399,7 +3084,7 @@ C.MOCK_USER = new C("mock-user");
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-let x = "9.6.11";
+let N = "9.6.7";
 
 /**
  * @license
@@ -3417,11 +3102,11 @@ let x = "9.6.11";
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-const N = new _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["Logger"]("@firebase/firestore");
+const x = new _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["Logger"]("@firebase/firestore");
 
 // Helper methods are needed because variables can't be exported as read/write
 function k() {
-    return N.logLevel;
+    return x.logLevel;
 }
 
 /**
@@ -3436,30 +3121,30 @@ function k() {
  *     <li>`error` to log errors only.</li>
  *     <li><code>`silent` to turn off logging.</li>
  *   </ul>
- */ function M(t) {
-    N.setLogLevel(t);
+ */ function O(t) {
+    x.setLogLevel(t);
 }
 
-function O(t, ...e) {
-    if (N.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG) {
+function M(t, ...e) {
+    if (x.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG) {
         const n = e.map(B);
-        N.debug(`Firestore (${x}): ${t}`, ...n);
+        x.debug(`Firestore (${N}): ${t}`, ...n);
     }
 }
 
-function F(t, ...e) {
-    if (N.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].ERROR) {
+function $(t, ...e) {
+    if (x.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].ERROR) {
         const n = e.map(B);
-        N.error(`Firestore (${x}): ${t}`, ...n);
+        x.error(`Firestore (${N}): ${t}`, ...n);
     }
 }
 
 /**
  * @internal
- */ function $(t, ...e) {
-    if (N.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].WARN) {
+ */ function F(t, ...e) {
+    if (x.logLevel <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].WARN) {
         const n = e.map(B);
-        N.warn(`Firestore (${x}): ${t}`, ...n);
+        x.warn(`Firestore (${N}): ${t}`, ...n);
     }
 }
 
@@ -3519,11 +3204,11 @@ function F(t, ...e) {
  */ function L(t = "Unexpected state") {
     // Log the failure in addition to throw an exception, just in case the
     // exception is swallowed.
-    const e = `FIRESTORE (${x}) INTERNAL ASSERTION FAILED: ` + t;
+    const e = `FIRESTORE (${N}) INTERNAL ASSERTION FAILED: ` + t;
     // NOTE: We don't use FirestoreError here because these are internal failures
     // that cannot be handled by the user. (Also it would create a circular
     // dependency between the error and assert modules which doesn't work.)
-    throw F(e), new Error(e);
+    throw $(e), new Error(e);
 }
 
 /**
@@ -3685,7 +3370,7 @@ e) {
     DATA_LOSS: "data-loss"
 };
 
-/** An error returned by a Firestore operation. */ class Q extends _firebase_util__WEBPACK_IMPORTED_MODULE_3__["FirebaseError"] {
+/** An error returned by a Firestore operation. */ class j extends _firebase_util__WEBPACK_IMPORTED_MODULE_3__["FirebaseError"] {
     /** @hideconstructor */
     constructor(
     /**
@@ -3719,7 +3404,7 @@ e) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class j {
+ */ class Q {
     constructor() {
         this.promise = new Promise(((t, e) => {
             this.resolve = t, this.reject = e;
@@ -3807,9 +3492,9 @@ class J {
                 const s = t => this.i !== n ? (n = this.i, e(t)) : Promise.resolve();
         // A promise that can be waited on to block on the next token change.
         // This promise is re-created after each change.
-                let i = new j;
+                let i = new Q;
         this.o = () => {
-            this.i++, this.currentUser = this.u(), i.resolve(), i = new j, t.enqueueRetryable((() => s(this.currentUser)));
+            this.i++, this.currentUser = this.u(), i.resolve(), i = new Q, t.enqueueRetryable((() => s(this.currentUser)));
         };
         const r = () => {
             const e = i;
@@ -3817,7 +3502,7 @@ class J {
                 await e.promise, await s(this.currentUser);
             }));
         }, o = t => {
-            O("FirebaseAuthCredentialsProvider", "Auth detected"), this.auth = t, this.auth.addAuthTokenListener(this.o), 
+            M("FirebaseAuthCredentialsProvider", "Auth detected"), this.auth = t, this.auth.addAuthTokenListener(this.o), 
             r();
         };
         this.t.onInit((t => o(t))), 
@@ -3831,7 +3516,7 @@ class J {
                 });
                 t ? o(t) : (
                 // If auth is still not available, proceed with `null` user
-                O("FirebaseAuthCredentialsProvider", "Auth not yet detected"), i.resolve(), i = new j);
+                M("FirebaseAuthCredentialsProvider", "Auth not yet detected"), i.resolve(), i = new Q);
             }
         }), 0), r();
     }
@@ -3844,7 +3529,7 @@ class J {
         // Cancel the request since the token changed while the request was
         // outstanding so the response is potentially for a previous user (which
         // user, we can't be sure).
-        this.i !== t ? (O("FirebaseAuthCredentialsProvider", "getToken aborted due to token change."), 
+        this.i !== t ? (M("FirebaseAuthCredentialsProvider", "getToken aborted due to token change."), 
         this.getToken()) : e ? (U("string" == typeof e.accessToken), new W(e.accessToken, this.currentUser)) : null)) : Promise.resolve(null);
     }
     invalidateToken() {
@@ -3908,16 +3593,16 @@ class tt {
     }
     start(t, e) {
         const n = t => {
-            null != t.error && O("FirebaseAppCheckTokenProvider", `Error getting App Check token; using placeholder token instead. Error: ${t.error.message}`);
+            null != t.error && M("FirebaseAppCheckTokenProvider", `Error getting App Check token; using placeholder token instead. Error: ${t.error.message}`);
             const n = t.token !== this.p;
-            return this.p = t.token, O("FirebaseAppCheckTokenProvider", `Received ${n ? "new" : "existing"} token.`), 
+            return this.p = t.token, M("FirebaseAppCheckTokenProvider", `Received ${n ? "new" : "existing"} token.`), 
             n ? e(t.token) : Promise.resolve();
         };
         this.o = e => {
             t.enqueueRetryable((() => n(e)));
         };
         const s = t => {
-            O("FirebaseAppCheckTokenProvider", "AppCheck detected"), this.appCheck = t, this.appCheck.addTokenListener(this.o);
+            M("FirebaseAppCheckTokenProvider", "AppCheck detected"), this.appCheck = t, this.appCheck.addTokenListener(this.o);
         };
         this.g.onInit((t => s(t))), 
         // Our users can initialize AppCheck after Firestore, so we give it
@@ -3929,7 +3614,7 @@ class tt {
                 });
                 t ? s(t) : 
                 // If AppCheck is still not available, proceed without it.
-                O("FirebaseAppCheckTokenProvider", "AppCheck not yet detected");
+                M("FirebaseAppCheckTokenProvider", "AppCheck not yet detected");
             }
         }), 0);
     }
@@ -4074,7 +3759,7 @@ function rt(t, e) {
 /**
  * Returns the immediate lexicographically-following string. This is useful to
  * construct an inclusive range for indexeddb iterators.
- */ function ut(t) {
+ */ function ct(t) {
     // Return the input string, with an additional NUL byte appended.
     return t + "\0";
 }
@@ -4110,7 +3795,7 @@ function rt(t, e) {
  * For examples and further specifications, refer to the
  * {@link https://github.com/google/protobuf/blob/master/src/google/protobuf/timestamp.proto | Timestamp definition}.
  */
-class at {
+class ut {
     /**
      * Creates a new timestamp.
      *
@@ -4131,18 +3816,18 @@ class at {
      * The fractions of a second at nanosecond resolution.*
      */
     e) {
-        if (this.seconds = t, this.nanoseconds = e, e < 0) throw new Q(G.INVALID_ARGUMENT, "Timestamp nanoseconds out of range: " + e);
-        if (e >= 1e9) throw new Q(G.INVALID_ARGUMENT, "Timestamp nanoseconds out of range: " + e);
-        if (t < -62135596800) throw new Q(G.INVALID_ARGUMENT, "Timestamp seconds out of range: " + t);
+        if (this.seconds = t, this.nanoseconds = e, e < 0) throw new j(G.INVALID_ARGUMENT, "Timestamp nanoseconds out of range: " + e);
+        if (e >= 1e9) throw new j(G.INVALID_ARGUMENT, "Timestamp nanoseconds out of range: " + e);
+        if (t < -62135596800) throw new j(G.INVALID_ARGUMENT, "Timestamp seconds out of range: " + t);
         // This will break in the year 10,000.
-                if (t >= 253402300800) throw new Q(G.INVALID_ARGUMENT, "Timestamp seconds out of range: " + t);
+                if (t >= 253402300800) throw new j(G.INVALID_ARGUMENT, "Timestamp seconds out of range: " + t);
     }
     /**
      * Creates a new timestamp with the current date, with millisecond precision.
      *
      * @returns a new timestamp representing the current date.
      */    static now() {
-        return at.fromMillis(Date.now());
+        return ut.fromMillis(Date.now());
     }
     /**
      * Creates a new timestamp from the given date.
@@ -4151,7 +3836,7 @@ class at {
      * @returns A new `Timestamp` representing the same point in time as the given
      *     date.
      */    static fromDate(t) {
-        return at.fromMillis(t.getTime());
+        return ut.fromMillis(t.getTime());
     }
     /**
      * Creates a new timestamp from the given number of milliseconds.
@@ -4162,7 +3847,7 @@ class at {
      *     number of milliseconds.
      */    static fromMillis(t) {
         const e = Math.floor(t / 1e3), n = Math.floor(1e6 * (t - 1e3 * e));
-        return new at(e, n);
+        return new ut(e, n);
     }
     /**
      * Converts a `Timestamp` to a JavaScript `Date` object. This conversion
@@ -4240,18 +3925,15 @@ class at {
 /**
  * A version of a document in Firestore. This corresponds to the version
  * timestamp, such as update_time or read_time.
- */ class ct {
+ */ class at {
     constructor(t) {
         this.timestamp = t;
     }
     static fromTimestamp(t) {
-        return new ct(t);
+        return new at(t);
     }
     static min() {
-        return new ct(new at(0, 0));
-    }
-    static max() {
-        return new ct(new at(253402300799, 999999999));
+        return new at(new ut(0, 0));
     }
     compareTo(t) {
         return this.timestamp._compareTo(t.timestamp);
@@ -4413,7 +4095,7 @@ class dt {
         // for legacy reasons and should not be used frequently).
         const e = [];
         for (const n of t) {
-            if (n.indexOf("//") >= 0) throw new Q(G.INVALID_ARGUMENT, `Invalid segment (${n}). Paths must not contain // in them.`);
+            if (n.indexOf("//") >= 0) throw new j(G.INVALID_ARGUMENT, `Invalid segment (${n}). Paths must not contain // in them.`);
             // Strip leading and traling slashed.
                         e.push(...n.split("/").filter((t => t.length > 0)));
         }
@@ -4469,20 +4151,20 @@ const wt = /^[_a-zA-Z][_a-zA-Z0-9]*$/;
         const e = [];
         let n = "", s = 0;
         const i = () => {
-            if (0 === n.length) throw new Q(G.INVALID_ARGUMENT, `Invalid field path (${t}). Paths must not be empty, begin with '.', end with '.', or contain '..'`);
+            if (0 === n.length) throw new j(G.INVALID_ARGUMENT, `Invalid field path (${t}). Paths must not be empty, begin with '.', end with '.', or contain '..'`);
             e.push(n), n = "";
         };
         let r = !1;
         for (;s < t.length; ) {
             const e = t[s];
             if ("\\" === e) {
-                if (s + 1 === t.length) throw new Q(G.INVALID_ARGUMENT, "Path has trailing escape character: " + t);
+                if (s + 1 === t.length) throw new j(G.INVALID_ARGUMENT, "Path has trailing escape character: " + t);
                 const e = t[s + 1];
-                if ("\\" !== e && "." !== e && "`" !== e) throw new Q(G.INVALID_ARGUMENT, "Path has invalid escape sequence: " + t);
+                if ("\\" !== e && "." !== e && "`" !== e) throw new j(G.INVALID_ARGUMENT, "Path has invalid escape sequence: " + t);
                 n += e, s += 2;
             } else "`" === e ? (r = !r, s++) : "." !== e || r ? (n += e, s++) : (i(), s++);
         }
-        if (i(), r) throw new Q(G.INVALID_ARGUMENT, "Unterminated ` in path: " + t);
+        if (i(), r) throw new j(G.INVALID_ARGUMENT, "Unterminated ` in path: " + t);
         return new mt(e);
     }
     static emptyPath() {
@@ -4591,8 +4273,6 @@ function yt() {
         return new pt(e);
     }
     static fromUint8Array(t) {
-        // TODO(indexing); Remove the copy of the byte string here as this method
-        // is frequently called during indexing.
         const e = 
         /**
  * Helper function to convert an Uint8array to a binary string.
@@ -4667,7 +4347,7 @@ const It = new RegExp(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.(\d+))?Z$/);
 /**
  * Converts the possible Proto values for a timestamp value into a "seconds and
  * nanos" representation.
- */ function Tt(t) {
+ */ function Et(t) {
     // The json interface (for the browser) will return an iso timestamp string,
     // while the proto js library (for node) will return a
     // google.protobuf.Timestamp instance.
@@ -4690,15 +4370,15 @@ const It = new RegExp(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.(\d+))?Z$/);
         };
     }
     return {
-        seconds: Et(t.seconds),
-        nanos: Et(t.nanos)
+        seconds: Tt(t.seconds),
+        nanos: Tt(t.nanos)
     };
 }
 
 /**
  * Converts the possible Proto types for numbers into a JavaScript number.
  * Returns 0 if the value is not numeric.
- */ function Et(t) {
+ */ function Tt(t) {
     // TODO(bjornick): Handle int64 greater than 53 bits.
     return "number" == typeof t ? t : "string" == typeof t ? Number(t) : 0;
 }
@@ -4762,8 +4442,8 @@ function Pt(t) {
 /**
  * Returns the local time at which this timestamp was first set.
  */ function bt(t) {
-    const e = Tt(t.mapValue.fields.__local_write_time__.timestampValue);
-    return new at(e.seconds, e.nanos);
+    const e = Et(t.mapValue.fields.__local_write_time__.timestampValue);
+    return new ut(e.seconds, e.nanos);
 }
 
 /**
@@ -4781,7 +4461,7 @@ function Pt(t) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Vt {
+ */ class vt {
     /**
      * Constructs a DatabaseInfo using the provided host, databaseId and
      * persistenceKey.
@@ -4799,9 +4479,9 @@ function Pt(t) {
      * @param useFetchStreams Whether to use the Fetch API instead of
      * XMLHTTPRequest
      */
-    constructor(t, e, n, s, i, r, o, u) {
+    constructor(t, e, n, s, i, r, o, c) {
         this.databaseId = t, this.appId = e, this.persistenceKey = n, this.host = s, this.ssl = i, 
-        this.forceLongPolling = r, this.autoDetectLongPolling = o, this.useFetchStreams = u;
+        this.forceLongPolling = r, this.autoDetectLongPolling = o, this.useFetchStreams = c;
     }
 }
 
@@ -4810,18 +4490,18 @@ function Pt(t) {
  * Represents the database ID a Firestore client is associated with.
  * @internal
  */
-class vt {
+class Vt {
     constructor(t, e) {
         this.projectId = t, this.database = e || "(default)";
     }
     static empty() {
-        return new vt("", "");
+        return new Vt("", "");
     }
     get isDefaultDatabase() {
         return "(default)" === this.database;
     }
     isEqual(t) {
-        return t instanceof vt && t.projectId === this.projectId && t.database === this.database;
+        return t instanceof Vt && t.projectId === this.projectId && t.database === this.database;
     }
 }
 
@@ -4880,18 +4560,18 @@ function St(t) {
  */
 /**
  * @internal
- */ class xt {
+ */ class Nt {
     constructor(t) {
         this.path = t;
     }
     static fromPath(t) {
-        return new xt(_t.fromString(t));
+        return new Nt(_t.fromString(t));
     }
     static fromName(t) {
-        return new xt(_t.fromString(t).popFirst(5));
+        return new Nt(_t.fromString(t).popFirst(5));
     }
     static empty() {
-        return new xt(_t.emptyPath());
+        return new Nt(_t.emptyPath());
     }
     get collectionGroup() {
         return this.path.popLast().lastSegment();
@@ -4923,7 +4603,7 @@ function St(t) {
      * @param segments - The segments of the path to the document
      * @returns A new instance of DocumentKey
      */    static fromSegments(t) {
-        return new xt(new _t(t.slice()));
+        return new Nt(new _t(t.slice()));
     }
 }
 
@@ -4942,30 +4622,26 @@ function St(t) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const Nt = {
+ */ const xt = {
     mapValue: {
         fields: {
             __type__: {
-                stringValue: "__max__"
+                stringValue: "__max___"
             }
         }
     }
-}, kt = {
-    nullValue: "NULL_VALUE"
 };
 
-/** Extracts the backend's type order for the provided value. */
-function Mt(t) {
-    return "nullValue" in t ? 0 /* NullValue */ : "booleanValue" in t ? 1 /* BooleanValue */ : "integerValue" in t || "doubleValue" in t ? 2 /* NumberValue */ : "timestampValue" in t ? 3 /* TimestampValue */ : "stringValue" in t ? 5 /* StringValue */ : "bytesValue" in t ? 6 /* BlobValue */ : "referenceValue" in t ? 7 /* RefValue */ : "geoPointValue" in t ? 8 /* GeoPointValue */ : "arrayValue" in t ? 9 /* ArrayValue */ : "mapValue" in t ? Rt(t) ? 4 /* ServerTimestampValue */ : Ht(t) ? 9 /* ArrayValue */ : 10 /* ObjectValue */ : L();
+/** Extracts the backend's type order for the provided value. */ function kt(t) {
+    return "nullValue" in t ? 0 /* NullValue */ : "booleanValue" in t ? 1 /* BooleanValue */ : "integerValue" in t || "doubleValue" in t ? 2 /* NumberValue */ : "timestampValue" in t ? 3 /* TimestampValue */ : "stringValue" in t ? 5 /* StringValue */ : "bytesValue" in t ? 6 /* BlobValue */ : "referenceValue" in t ? 7 /* RefValue */ : "geoPointValue" in t ? 8 /* GeoPointValue */ : "arrayValue" in t ? 9 /* ArrayValue */ : "mapValue" in t ? Rt(t) ? 4 /* ServerTimestampValue */ : 10 /* ObjectValue */ : L();
 }
 
 /** Tests `left` and `right` for equality based on the backend semantics. */ function Ot(t, e) {
     if (t === e) return !0;
-    const n = Mt(t);
-    if (n !== Mt(e)) return !1;
+    const n = kt(t);
+    if (n !== kt(e)) return !1;
     switch (n) {
       case 0 /* NullValue */ :
-      case 9007199254740991 /* MaxValue */ :
         return !0;
 
       case 1 /* BooleanValue */ :
@@ -4979,7 +4655,7 @@ function Mt(t) {
             if ("string" == typeof t.timestampValue && "string" == typeof e.timestampValue && t.timestampValue.length === e.timestampValue.length) 
             // Use string equality for ISO 8601 timestamps
             return t.timestampValue === e.timestampValue;
-            const n = Tt(t.timestampValue), s = Tt(e.timestampValue);
+            const n = Et(t.timestampValue), s = Et(e.timestampValue);
             return n.seconds === s.seconds && n.nanos === s.nanos;
         }(t, e);
 
@@ -4996,14 +4672,14 @@ function Mt(t) {
 
       case 8 /* GeoPointValue */ :
         return function(t, e) {
-            return Et(t.geoPointValue.latitude) === Et(e.geoPointValue.latitude) && Et(t.geoPointValue.longitude) === Et(e.geoPointValue.longitude);
+            return Tt(t.geoPointValue.latitude) === Tt(e.geoPointValue.latitude) && Tt(t.geoPointValue.longitude) === Tt(e.geoPointValue.longitude);
         }(t, e);
 
       case 2 /* NumberValue */ :
         return function(t, e) {
-            if ("integerValue" in t && "integerValue" in e) return Et(t.integerValue) === Et(e.integerValue);
+            if ("integerValue" in t && "integerValue" in e) return Tt(t.integerValue) === Tt(e.integerValue);
             if ("doubleValue" in t && "doubleValue" in e) {
-                const n = Et(t.doubleValue), s = Et(e.doubleValue);
+                const n = Tt(t.doubleValue), s = Tt(e.doubleValue);
                 return n === s ? Dt(n) === Dt(s) : isNaN(n) && isNaN(s);
             }
             return !1;
@@ -5026,17 +4702,16 @@ function Mt(t) {
     }
 }
 
-function Ft(t, e) {
+function Mt(t, e) {
     return void 0 !== (t.values || []).find((t => Ot(t, e)));
 }
 
 function $t(t, e) {
     if (t === e) return 0;
-    const n = Mt(t), s = Mt(e);
+    const n = kt(t), s = kt(e);
     if (n !== s) return rt(n, s);
     switch (n) {
       case 0 /* NullValue */ :
-      case 9007199254740991 /* MaxValue */ :
         return 0;
 
       case 1 /* BooleanValue */ :
@@ -5044,17 +4719,17 @@ function $t(t, e) {
 
       case 2 /* NumberValue */ :
         return function(t, e) {
-            const n = Et(t.integerValue || t.doubleValue), s = Et(e.integerValue || e.doubleValue);
+            const n = Tt(t.integerValue || t.doubleValue), s = Tt(e.integerValue || e.doubleValue);
             return n < s ? -1 : n > s ? 1 : n === s ? 0 : 
             // one or both are NaN.
             isNaN(n) ? isNaN(s) ? 0 : -1 : 1;
         }(t, e);
 
       case 3 /* TimestampValue */ :
-        return Bt(t.timestampValue, e.timestampValue);
+        return Ft(t.timestampValue, e.timestampValue);
 
       case 4 /* ServerTimestampValue */ :
-        return Bt(bt(t), bt(e));
+        return Ft(bt(t), bt(e));
 
       case 5 /* StringValue */ :
         return rt(t.stringValue, e.stringValue);
@@ -5077,9 +4752,9 @@ function $t(t, e) {
 
       case 8 /* GeoPointValue */ :
         return function(t, e) {
-            const n = rt(Et(t.latitude), Et(e.latitude));
+            const n = rt(Tt(t.latitude), Tt(e.latitude));
             if (0 !== n) return n;
-            return rt(Et(t.longitude), Et(e.longitude));
+            return rt(Tt(t.longitude), Tt(e.longitude));
         }(t.geoPointValue, e.geoPointValue);
 
       case 9 /* ArrayValue */ :
@@ -5118,24 +4793,24 @@ function $t(t, e) {
     }
 }
 
-function Bt(t, e) {
+function Ft(t, e) {
     if ("string" == typeof t && "string" == typeof e && t.length === e.length) return rt(t, e);
-    const n = Tt(t), s = Tt(e), i = rt(n.seconds, s.seconds);
+    const n = Et(t), s = Et(e), i = rt(n.seconds, s.seconds);
     return 0 !== i ? i : rt(n.nanos, s.nanos);
 }
 
-function Lt(t) {
-    return Ut(t);
+function Bt(t) {
+    return Lt(t);
 }
 
-function Ut(t) {
+function Lt(t) {
     return "nullValue" in t ? "null" : "booleanValue" in t ? "" + t.booleanValue : "integerValue" in t ? "" + t.integerValue : "doubleValue" in t ? "" + t.doubleValue : "timestampValue" in t ? function(t) {
-        const e = Tt(t);
+        const e = Et(t);
         return `time(${e.seconds},${e.nanos})`;
     }(t.timestampValue) : "stringValue" in t ? t.stringValue : "bytesValue" in t ? At(t.bytesValue).toBase64() : "referenceValue" in t ? (n = t.referenceValue, 
-    xt.fromName(n).toString()) : "geoPointValue" in t ? `geo(${(e = t.geoPointValue).latitude},${e.longitude})` : "arrayValue" in t ? function(t) {
+    Nt.fromName(n).toString()) : "geoPointValue" in t ? `geo(${(e = t.geoPointValue).latitude},${e.longitude})` : "arrayValue" in t ? function(t) {
         let e = "[", n = !0;
-        for (const s of t.values || []) n ? n = !1 : e += ",", e += Ut(s);
+        for (const s of t.values || []) n ? n = !1 : e += ",", e += Lt(s);
         return e + "]";
     }
     /** Returns a reference value for the provided database and key. */ (t.arrayValue) : "mapValue" in t ? function(t) {
@@ -5143,29 +4818,29 @@ function Ut(t) {
         // matching canonical IDs for identical maps, we need to sort the keys.
         const e = Object.keys(t.fields || {}).sort();
         let n = "{", s = !0;
-        for (const i of e) s ? s = !1 : n += ",", n += `${i}:${Ut(t.fields[i])}`;
+        for (const i of e) s ? s = !1 : n += ",", n += `${i}:${Lt(t.fields[i])}`;
         return n + "}";
     }(t.mapValue) : L();
     var e, n;
 }
 
-function qt(t, e) {
+function Ut(t, e) {
     return {
         referenceValue: `projects/${t.projectId}/databases/${t.database}/documents/${e.path.canonicalString()}`
     };
 }
 
-/** Returns true if `value` is an IntegerValue . */ function Kt(t) {
+/** Returns true if `value` is an IntegerValue . */ function qt(t) {
     return !!t && "integerValue" in t;
 }
 
 /** Returns true if `value` is a DoubleValue. */
 /** Returns true if `value` is an ArrayValue. */
-function Gt(t) {
+function Kt(t) {
     return !!t && "arrayValue" in t;
 }
 
-/** Returns true if `value` is a NullValue. */ function Qt(t) {
+/** Returns true if `value` is a NullValue. */ function Gt(t) {
     return !!t && "nullValue" in t;
 }
 
@@ -5173,11 +4848,11 @@ function Gt(t) {
     return !!t && "doubleValue" in t && isNaN(Number(t.doubleValue));
 }
 
-/** Returns true if `value` is a MapValue. */ function Wt(t) {
+/** Returns true if `value` is a MapValue. */ function Qt(t) {
     return !!t && "mapValue" in t;
 }
 
-/** Creates a deep copy of `source`. */ function zt(t) {
+/** Creates a deep copy of `source`. */ function Wt(t) {
     if (t.geoPointValue) return {
         geoPointValue: Object.assign({}, t.geoPointValue)
     };
@@ -5190,7 +4865,7 @@ function Gt(t) {
                 fields: {}
             }
         };
-        return lt(t.mapValue.fields, ((t, n) => e.mapValue.fields[t] = zt(n))), e;
+        return lt(t.mapValue.fields, ((t, n) => e.mapValue.fields[t] = Wt(n))), e;
     }
     if (t.arrayValue) {
         const e = {
@@ -5198,74 +4873,13 @@ function Gt(t) {
                 values: []
             }
         };
-        for (let n = 0; n < (t.arrayValue.values || []).length; ++n) e.arrayValue.values[n] = zt(t.arrayValue.values[n]);
+        for (let n = 0; n < (t.arrayValue.values || []).length; ++n) e.arrayValue.values[n] = Wt(t.arrayValue.values[n]);
         return e;
     }
     return Object.assign({}, t);
 }
 
-/** Returns true if the Value represents the canonical {@link #MAX_VALUE} . */ function Ht(t) {
-    return "__max__" === (((t.mapValue || {}).fields || {}).__type__ || {}).stringValue;
-}
-
-/** Returns the lowest value for the given value type (inclusive). */ function Jt(t) {
-    return "nullValue" in t ? kt : "booleanValue" in t ? {
-        booleanValue: !1
-    } : "integerValue" in t || "doubleValue" in t ? {
-        doubleValue: NaN
-    } : "timestampValue" in t ? {
-        timestampValue: {
-            seconds: Number.MIN_SAFE_INTEGER
-        }
-    } : "stringValue" in t ? {
-        stringValue: ""
-    } : "bytesValue" in t ? {
-        bytesValue: ""
-    } : "referenceValue" in t ? qt(vt.empty(), xt.empty()) : "geoPointValue" in t ? {
-        geoPointValue: {
-            latitude: -90,
-            longitude: -180
-        }
-    } : "arrayValue" in t ? {
-        arrayValue: {}
-    } : "mapValue" in t ? {
-        mapValue: {}
-    } : L();
-}
-
-/** Returns the largest value for the given value type (exclusive). */ function Yt(t) {
-    return "nullValue" in t ? {
-        booleanValue: !1
-    } : "booleanValue" in t ? {
-        doubleValue: NaN
-    } : "integerValue" in t || "doubleValue" in t ? {
-        timestampValue: {
-            seconds: Number.MIN_SAFE_INTEGER
-        }
-    } : "timestampValue" in t ? {
-        stringValue: ""
-    } : "stringValue" in t ? {
-        bytesValue: ""
-    } : "bytesValue" in t ? qt(vt.empty(), xt.empty()) : "referenceValue" in t ? {
-        geoPointValue: {
-            latitude: -90,
-            longitude: -180
-        }
-    } : "geoPointValue" in t ? {
-        arrayValue: {}
-    } : "arrayValue" in t ? {
-        mapValue: {}
-    } : "mapValue" in t ? Nt : L();
-}
-
-function Xt(t, e) {
-    return void 0 === t ? e : void 0 === e || $t(t, e) > 0 ? t : e;
-}
-
-function Zt(t, e) {
-    return void 0 === t ? e : void 0 === e || $t(t, e) < 0 ? t : e;
-}
-
+/** Returns true if the Value represents the canonical {@link #MAX_VALUE} . */
 /**
  * @license
  * Copyright 2017 Google LLC
@@ -5285,12 +4899,13 @@ function Zt(t, e) {
 /**
  * An ObjectValue represents a MapValue in the Firestore Proto and offers the
  * ability to add and remove fields (via the ObjectValueBuilder).
- */ class te {
+ */
+class zt {
     constructor(t) {
         this.value = t;
     }
     static empty() {
-        return new te({
+        return new zt({
             mapValue: {}
         });
     }
@@ -5304,7 +4919,7 @@ function Zt(t, e) {
         {
             let e = this.value;
             for (let n = 0; n < t.length - 1; ++n) if (e = (e.mapValue.fields || {})[t.get(n)], 
-            !Wt(e)) return null;
+            !Qt(e)) return null;
             return e = (e.mapValue.fields || {})[t.lastSegment()], e || null;
         }
     }
@@ -5314,7 +4929,7 @@ function Zt(t, e) {
      * @param path - The field path to set.
      * @param value - The value to set.
      */    set(t, e) {
-        this.getFieldsMap(t.popLast())[t.lastSegment()] = zt(e);
+        this.getFieldsMap(t.popLast())[t.lastSegment()] = Wt(e);
     }
     /**
      * Sets the provided fields to the provided values.
@@ -5328,7 +4943,7 @@ function Zt(t, e) {
                 const t = this.getFieldsMap(e);
                 this.applyChanges(t, n, s), n = {}, s = [], e = i.popLast();
             }
-            t ? n[i.lastSegment()] = zt(t) : s.push(i.lastSegment());
+            t ? n[i.lastSegment()] = Wt(t) : s.push(i.lastSegment());
         }));
         const i = this.getFieldsMap(e);
         this.applyChanges(i, n, s);
@@ -5340,7 +4955,7 @@ function Zt(t, e) {
      * @param path - The field path to remove.
      */    delete(t) {
         const e = this.field(t.popLast());
-        Wt(e) && e.mapValue.fields && delete e.mapValue.fields[t.lastSegment()];
+        Qt(e) && e.mapValue.fields && delete e.mapValue.fields[t.lastSegment()];
     }
     isEqual(t) {
         return Ot(this.value, t.value);
@@ -5355,7 +4970,7 @@ function Zt(t, e) {
         });
         for (let n = 0; n < t.length; ++n) {
             let s = e.mapValue.fields[t.get(n)];
-            Wt(s) && s.mapValue.fields || (s = {
+            Qt(s) && s.mapValue.fields || (s = {
                 mapValue: {
                     fields: {}
                 }
@@ -5371,18 +4986,18 @@ function Zt(t, e) {
         for (const e of n) delete t[e];
     }
     clone() {
-        return new te(zt(this.value));
+        return new zt(Wt(this.value));
     }
 }
 
 /**
  * Returns a FieldMask built from all fields in a MapValue.
- */ function ee(t) {
+ */ function Ht(t) {
     const e = [];
     return lt(t.fields, ((t, n) => {
         const s = new mt([ t ]);
-        if (Wt(n)) {
-            const t = ee(n.mapValue).fields;
+        if (Qt(n)) {
+            const t = Ht(n.mapValue).fields;
             if (0 === t.length) 
             // Preserve the empty map by adding it to the FieldMask.
             e.push(s); else 
@@ -5421,7 +5036,7 @@ function Zt(t, e) {
  * not transition to one of these states even after all mutations have been
  * applied, `isValidDocument()` returns false and the document should be removed
  * from all views.
- */ class ne {
+ */ class Jt {
     constructor(t, e, n, s, i, r) {
         this.key = t, this.documentType = e, this.version = n, this.readTime = s, this.data = i, 
         this.documentState = r;
@@ -5430,23 +5045,23 @@ function Zt(t, e) {
      * Creates a document with no known version or data, but which can serve as
      * base document for mutations.
      */    static newInvalidDocument(t) {
-        return new ne(t, 0 /* INVALID */ , ct.min(), ct.min(), te.empty(), 0 /* SYNCED */);
+        return new Jt(t, 0 /* INVALID */ , at.min(), at.min(), zt.empty(), 0 /* SYNCED */);
     }
     /**
      * Creates a new document that is known to exist with the given data at the
      * given version.
      */    static newFoundDocument(t, e, n) {
-        return new ne(t, 1 /* FOUND_DOCUMENT */ , e, ct.min(), n, 0 /* SYNCED */);
+        return new Jt(t, 1 /* FOUND_DOCUMENT */ , e, at.min(), n, 0 /* SYNCED */);
     }
     /** Creates a new document that is known to not exist at the given version. */    static newNoDocument(t, e) {
-        return new ne(t, 2 /* NO_DOCUMENT */ , e, ct.min(), te.empty(), 0 /* SYNCED */);
+        return new Jt(t, 2 /* NO_DOCUMENT */ , e, at.min(), zt.empty(), 0 /* SYNCED */);
     }
     /**
      * Creates a new document that is known to exist at the given version but
      * whose data is not known (e.g. a document that was updated without a known
      * base document).
      */    static newUnknownDocument(t, e) {
-        return new ne(t, 3 /* UNKNOWN_DOCUMENT */ , e, ct.min(), te.empty(), 2 /* HAS_COMMITTED_MUTATIONS */);
+        return new Jt(t, 3 /* UNKNOWN_DOCUMENT */ , e, at.min(), zt.empty(), 2 /* HAS_COMMITTED_MUTATIONS */);
     }
     /**
      * Changes the document type to indicate that it exists and that its version
@@ -5459,7 +5074,7 @@ function Zt(t, e) {
      * Changes the document type to indicate that it doesn't exist at the given
      * version.
      */    convertToNoDocument(t) {
-        return this.version = t, this.documentType = 2 /* NO_DOCUMENT */ , this.data = te.empty(), 
+        return this.version = t, this.documentType = 2 /* NO_DOCUMENT */ , this.data = zt.empty(), 
         this.documentState = 0 /* SYNCED */ , this;
     }
     /**
@@ -5467,7 +5082,7 @@ function Zt(t, e) {
      * that its data is not known (e.g. a document that was updated without a known
      * base document).
      */    convertToUnknownDocument(t) {
-        return this.version = t, this.documentType = 3 /* UNKNOWN_DOCUMENT */ , this.data = te.empty(), 
+        return this.version = t, this.documentType = 3 /* UNKNOWN_DOCUMENT */ , this.data = zt.empty(), 
         this.documentState = 2 /* HAS_COMMITTED_MUTATIONS */ , this;
     }
     setHasCommittedMutations() {
@@ -5501,10 +5116,10 @@ function Zt(t, e) {
         return 3 /* UNKNOWN_DOCUMENT */ === this.documentType;
     }
     isEqual(t) {
-        return t instanceof ne && this.key.isEqual(t.key) && this.version.isEqual(t.version) && this.documentType === t.documentType && this.documentState === t.documentState && this.data.isEqual(t.data);
+        return t instanceof Jt && this.key.isEqual(t.key) && this.version.isEqual(t.version) && this.documentType === t.documentType && this.documentState === t.documentState && this.data.isEqual(t.data);
     }
     mutableCopy() {
-        return new ne(this.key, this.documentType, this.version, this.readTime, this.data.clone(), this.documentState);
+        return new Jt(this.key, this.documentType, this.version, this.readTime, this.data.clone(), this.documentState);
     }
     toString() {
         return `Document(${this.key}, ${this.version}, ${JSON.stringify(this.data.value)}, {documentType: ${this.documentType}}), {documentState: ${this.documentState}})`;
@@ -5526,7 +5141,7 @@ function Zt(t, e) {
  * collection group-scoped indices. Every index can be used for both single
  * collection and collection group queries.
  */
-class se {
+class Yt {
     constructor(
     /**
      * The index ID. Returns -1 if the index ID is not available (e.g. the index
@@ -5543,24 +5158,10 @@ class se {
     }
 }
 
-/** An ID for an index that has not yet been added to persistence.  */
-/** Returns the ArrayContains/ArrayContainsAny segment for this index. */
-function ie(t) {
-    return t.fields.find((t => 2 /* CONTAINS */ === t.kind));
-}
-
-/** Returns all directional (ascending/descending) segments for this index. */ function re(t) {
-    return t.fields.filter((t => 2 /* CONTAINS */ !== t.kind));
-}
-
-/**
- * Returns the order of the document key component for the given index.
- *
- * PORTING NOTE: This is only used in the Web IndexedDb implementation.
- */ se.UNKNOWN_ID = -1;
+/** An ID for an index that has not yet been added to persistence.  */ Yt.UNKNOWN_ID = -1;
 
 /** An index component consisting of field path and index type.  */
-class oe {
+class Xt {
     constructor(
     /** The field path of the component. */
     t, 
@@ -5573,7 +5174,7 @@ class oe {
 /**
  * Stores the "high water mark" that indicates how updated the Index is for the
  * current user.
- */ class ue {
+ */ class Zt {
     constructor(
     /**
      * Indicates when the index was last updated (relative to other indexes).
@@ -5584,32 +5185,14 @@ class oe {
         this.sequenceNumber = t, this.offset = e;
     }
     /** The state of an index that has not yet been backfilled. */    static empty() {
-        return new ue(0, he.min());
+        return new Zt(0, te.min());
     }
-}
-
-/**
- * Creates an offset that matches all documents with a read time higher than
- * `readTime`.
- */ function ae(t, e) {
-    // We want to create an offset that matches all documents with a read time
-    // greater than the provided read time. To do so, we technically need to
-    // create an offset for `(readTime, MAX_DOCUMENT_KEY)`. While we could use
-    // Unicode codepoints to generate MAX_DOCUMENT_KEY, it is much easier to use
-    // `(readTime + 1, DocumentKey.empty())` since `> DocumentKey.empty()` matches
-    // all valid document IDs.
-    const n = t.toTimestamp().seconds, s = t.toTimestamp().nanoseconds + 1, i = ct.fromTimestamp(1e9 === s ? new at(n + 1, 0) : new at(n, s));
-    return new he(i, xt.empty(), e);
-}
-
-/** Creates a new offset based on the provided document. */ function ce(t) {
-    return new he(t.readTime, t.key, -1);
 }
 
 /**
  * Stores the latest read time, document and batch ID that were processed for an
  * index.
- */ class he {
+ */ class te {
     constructor(
     /**
      * The latest read time version that has been indexed by Firestore for this
@@ -5627,17 +5210,9 @@ class oe {
     n) {
         this.readTime = t, this.documentKey = e, this.largestBatchId = n;
     }
-    /** Returns an offset that sorts before all regular offsets. */    static min() {
-        return new he(ct.min(), xt.empty(), -1);
+    /** The state of an index that has not yet been backfilled. */    static min() {
+        return new te(at.min(), Nt.empty(), -1);
     }
-    /** Returns an offset that sorts after all regular offsets. */    static max() {
-        return new he(ct.max(), xt.empty(), -1);
-    }
-}
-
-function le(t, e) {
-    let n = t.readTime.compareTo(e.readTime);
-    return 0 !== n ? n : (n = xt.comparator(t.documentKey, e.documentKey), 0 !== n ? n : rt(t.largestBatchId, e.largestBatchId));
 }
 
 /**
@@ -5657,7 +5232,7 @@ function le(t, e) {
  * limitations under the License.
  */
 // Visible for testing
-class fe {
+class ee {
     constructor(t, e = null, n = [], s = [], i = null, r = null, o = null) {
         this.path = t, this.collectionGroup = e, this.orderBy = n, this.filters = s, this.limit = i, 
         this.startAt = r, this.endAt = o, this.P = null;
@@ -5671,179 +5246,78 @@ class fe {
  * NOTE: you should always construct `Target` from `Query.toTarget` instead of
  * using this factory method, because `Query` provides an implicit `orderBy`
  * property.
- */ function de(t, e = null, n = [], s = [], i = null, r = null, o = null) {
-    return new fe(t, e, n, s, i, r, o);
+ */ function ne(t, e = null, n = [], s = [], i = null, r = null, o = null) {
+    return new ee(t, e, n, s, i, r, o);
 }
 
-function _e(t) {
+function se(t) {
     const e = K(t);
     if (null === e.P) {
         let t = e.path.canonicalString();
         null !== e.collectionGroup && (t += "|cg:" + e.collectionGroup), t += "|f:", t += e.filters.map((t => {
-            return (e = t).field.canonicalString() + e.op.toString() + Lt(e.value);
+            return (e = t).field.canonicalString() + e.op.toString() + Bt(e.value);
             var e;
         })).join(","), t += "|ob:", t += e.orderBy.map((t => function(t) {
             // TODO(b/29183165): Make this collision robust.
             return t.field.canonicalString() + t.dir;
         }(t))).join(","), St(e.limit) || (t += "|l:", t += e.limit), e.startAt && (t += "|lb:", 
-        t += e.startAt.inclusive ? "b:" : "a:", t += e.startAt.position.map((t => Lt(t))).join(",")), 
-        e.endAt && (t += "|ub:", t += e.endAt.inclusive ? "a:" : "b:", t += e.endAt.position.map((t => Lt(t))).join(",")), 
+        t += e.startAt.inclusive ? "b:" : "a:", t += e.startAt.position.map((t => Bt(t))).join(",")), 
+        e.endAt && (t += "|ub:", t += e.endAt.inclusive ? "a:" : "b:", t += e.endAt.position.map((t => Bt(t))).join(",")), 
         e.P = t;
     }
     return e.P;
 }
 
-function we(t) {
+function ie(t) {
     let e = t.path.canonicalString();
     return null !== t.collectionGroup && (e += " collectionGroup=" + t.collectionGroup), 
     t.filters.length > 0 && (e += `, filters: [${t.filters.map((t => {
-        return `${(e = t).field.canonicalString()} ${e.op} ${Lt(e.value)}`;
+        return `${(e = t).field.canonicalString()} ${e.op} ${Bt(e.value)}`;
         /** Returns a debug description for `filter`. */
         var e;
         /** Filter that matches on key fields (i.e. '__name__'). */    })).join(", ")}]`), 
     St(t.limit) || (e += ", limit: " + t.limit), t.orderBy.length > 0 && (e += `, orderBy: [${t.orderBy.map((t => function(t) {
         return `${t.field.canonicalString()} (${t.dir})`;
     }(t))).join(", ")}]`), t.startAt && (e += ", startAt: ", e += t.startAt.inclusive ? "b:" : "a:", 
-    e += t.startAt.position.map((t => Lt(t))).join(",")), t.endAt && (e += ", endAt: ", 
-    e += t.endAt.inclusive ? "a:" : "b:", e += t.endAt.position.map((t => Lt(t))).join(",")), 
+    e += t.startAt.position.map((t => Bt(t))).join(",")), t.endAt && (e += ", endAt: ", 
+    e += t.endAt.inclusive ? "a:" : "b:", e += t.endAt.position.map((t => Bt(t))).join(",")), 
     `Target(${e})`;
 }
 
-function me(t, e) {
+function re(t, e) {
     if (t.limit !== e.limit) return !1;
     if (t.orderBy.length !== e.orderBy.length) return !1;
-    for (let n = 0; n < t.orderBy.length; n++) if (!xe(t.orderBy[n], e.orderBy[n])) return !1;
+    for (let n = 0; n < t.orderBy.length; n++) if (!ye(t.orderBy[n], e.orderBy[n])) return !1;
     if (t.filters.length !== e.filters.length) return !1;
     for (let i = 0; i < t.filters.length; i++) if (n = t.filters[i], s = e.filters[i], 
     n.op !== s.op || !n.field.isEqual(s.field) || !Ot(n.value, s.value)) return !1;
     var n, s;
-    return t.collectionGroup === e.collectionGroup && (!!t.path.isEqual(e.path) && (!!ke(t.startAt, e.startAt) && ke(t.endAt, e.endAt)));
+    return t.collectionGroup === e.collectionGroup && (!!t.path.isEqual(e.path) && (!!Ie(t.startAt, e.startAt) && Ie(t.endAt, e.endAt)));
 }
 
-function ge(t) {
-    return xt.isDocumentKey(t.path) && null === t.collectionGroup && 0 === t.filters.length;
+function oe(t) {
+    return Nt.isDocumentKey(t.path) && null === t.collectionGroup && 0 === t.filters.length;
 }
 
-/** Returns the field filters that target the given field path. */ function ye(t, e) {
-    return t.filters.filter((t => t instanceof Te && t.field.isEqual(e)));
-}
-
-/**
- * Returns the values that are used in ARRAY_CONTAINS or ARRAY_CONTAINS_ANY
- * filters. Returns `null` if there are no such filters.
- */
-/**
- * Returns the value to use as the lower bound for ascending index segment at
- * the provided `fieldPath` (or the upper bound for an descending segment).
- */
-function pe(t, e, n) {
-    let s, i = !0;
-    // Process all filters to find a value for the current field segment
-    for (const n of ye(t, e)) {
-        let t, e = !0;
-        switch (n.op) {
-          case "<" /* LESS_THAN */ :
-          case "<=" /* LESS_THAN_OR_EQUAL */ :
-            t = Jt(n.value);
-            break;
-
-          case "==" /* EQUAL */ :
-          case "in" /* IN */ :
-          case ">=" /* GREATER_THAN_OR_EQUAL */ :
-            t = n.value;
-            break;
-
-          case ">" /* GREATER_THAN */ :
-            t = n.value, e = !1;
-            break;
-
-          case "!=" /* NOT_EQUAL */ :
-          case "not-in" /* NOT_IN */ :
-            t = kt;
- // Remaining filters cannot be used as lower bounds.
-                }
-        Xt(s, t) === t && (s = t, i = e);
-    }
-    // If there is an additional bound, compare the values against the existing
-    // range to see if we can narrow the scope.
-        if (null !== n) for (let r = 0; r < t.orderBy.length; ++r) {
-        if (t.orderBy[r].field.isEqual(e)) {
-            const t = n.position[r];
-            Xt(s, t) === t && (s = t, i = n.inclusive);
-            break;
-        }
-    }
-    return {
-        value: s,
-        inclusive: i
-    };
-}
-
-/**
- * Returns the value to use as the upper bound for ascending index segment at
- * the provided `fieldPath` (or the lower bound for an descending segment).
- */ function Ie(t, e, n) {
-    let s, i = !0;
-    // Process all filters to find a value for the current field segment
-    for (const n of ye(t, e)) {
-        let t, e = !0;
-        switch (n.op) {
-          case ">=" /* GREATER_THAN_OR_EQUAL */ :
-          case ">" /* GREATER_THAN */ :
-            t = Yt(n.value), e = !1;
-            break;
-
-          case "==" /* EQUAL */ :
-          case "in" /* IN */ :
-          case "<=" /* LESS_THAN_OR_EQUAL */ :
-            t = n.value;
-            break;
-
-          case "<" /* LESS_THAN */ :
-            t = n.value, e = !1;
-            break;
-
-          case "!=" /* NOT_EQUAL */ :
-          case "not-in" /* NOT_IN */ :
-            t = Nt;
- // Remaining filters cannot be used as upper bounds.
-                }
-        Zt(s, t) === t && (s = t, i = e);
-    }
-    // If there is an additional bound, compare the values against the existing
-    // range to see if we can narrow the scope.
-        if (null !== n) for (let r = 0; r < t.orderBy.length; ++r) {
-        if (t.orderBy[r].field.isEqual(e)) {
-            const t = n.position[r];
-            Zt(s, t) === t && (s = t, i = n.inclusive);
-            break;
-        }
-    }
-    return {
-        value: s,
-        inclusive: i
-    };
-}
-
-class Te extends class {} {
+class ce extends class {} {
     constructor(t, e, n) {
         super(), this.field = t, this.op = e, this.value = n;
     }
     /**
      * Creates a filter based on the provided arguments.
      */    static create(t, e, n) {
-        return t.isKeyField() ? "in" /* IN */ === e || "not-in" /* NOT_IN */ === e ? this.V(t, e, n) : new Ee(t, e, n) : "array-contains" /* ARRAY_CONTAINS */ === e ? new be(t, n) : "in" /* IN */ === e ? new Ve(t, n) : "not-in" /* NOT_IN */ === e ? new ve(t, n) : "array-contains-any" /* ARRAY_CONTAINS_ANY */ === e ? new Se(t, n) : new Te(t, e, n);
+        return t.isKeyField() ? "in" /* IN */ === e || "not-in" /* NOT_IN */ === e ? this.v(t, e, n) : new ue(t, e, n) : "array-contains" /* ARRAY_CONTAINS */ === e ? new fe(t, n) : "in" /* IN */ === e ? new de(t, n) : "not-in" /* NOT_IN */ === e ? new _e(t, n) : "array-contains-any" /* ARRAY_CONTAINS_ANY */ === e ? new we(t, n) : new ce(t, e, n);
     }
-    static V(t, e, n) {
-        return "in" /* IN */ === e ? new Ae(t, n) : new Re(t, n);
+    static v(t, e, n) {
+        return "in" /* IN */ === e ? new ae(t, n) : new he(t, n);
     }
     matches(t) {
         const e = t.data.field(this.field);
         // Types do not have to match in NOT_EQUAL filters.
-                return "!=" /* NOT_EQUAL */ === this.op ? null !== e && this.v($t(e, this.value)) : null !== e && Mt(this.value) === Mt(e) && this.v($t(e, this.value));
+                return "!=" /* NOT_EQUAL */ === this.op ? null !== e && this.V($t(e, this.value)) : null !== e && kt(this.value) === kt(e) && this.V($t(e, this.value));
         // Only compare types with matching backend order (such as double and int).
         }
-    v(t) {
+    V(t) {
         switch (this.op) {
           case "<" /* LESS_THAN */ :
             return t < 0;
@@ -5872,79 +5346,79 @@ class Te extends class {} {
     }
 }
 
-class Ee extends Te {
+class ue extends ce {
     constructor(t, e, n) {
-        super(t, e, n), this.key = xt.fromName(n.referenceValue);
+        super(t, e, n), this.key = Nt.fromName(n.referenceValue);
     }
     matches(t) {
-        const e = xt.comparator(t.key, this.key);
-        return this.v(e);
+        const e = Nt.comparator(t.key, this.key);
+        return this.V(e);
     }
 }
 
-/** Filter that matches on key fields within an array. */ class Ae extends Te {
+/** Filter that matches on key fields within an array. */ class ae extends ce {
     constructor(t, e) {
-        super(t, "in" /* IN */ , e), this.keys = Pe("in" /* IN */ , e);
+        super(t, "in" /* IN */ , e), this.keys = le("in" /* IN */ , e);
     }
     matches(t) {
         return this.keys.some((e => e.isEqual(t.key)));
     }
 }
 
-/** Filter that matches on key fields not present within an array. */ class Re extends Te {
+/** Filter that matches on key fields not present within an array. */ class he extends ce {
     constructor(t, e) {
-        super(t, "not-in" /* NOT_IN */ , e), this.keys = Pe("not-in" /* NOT_IN */ , e);
+        super(t, "not-in" /* NOT_IN */ , e), this.keys = le("not-in" /* NOT_IN */ , e);
     }
     matches(t) {
         return !this.keys.some((e => e.isEqual(t.key)));
     }
 }
 
-function Pe(t, e) {
+function le(t, e) {
     var n;
-    return ((null === (n = e.arrayValue) || void 0 === n ? void 0 : n.values) || []).map((t => xt.fromName(t.referenceValue)));
+    return ((null === (n = e.arrayValue) || void 0 === n ? void 0 : n.values) || []).map((t => Nt.fromName(t.referenceValue)));
 }
 
-/** A Filter that implements the array-contains operator. */ class be extends Te {
+/** A Filter that implements the array-contains operator. */ class fe extends ce {
     constructor(t, e) {
         super(t, "array-contains" /* ARRAY_CONTAINS */ , e);
     }
     matches(t) {
         const e = t.data.field(this.field);
-        return Gt(e) && Ft(e.arrayValue, this.value);
+        return Kt(e) && Mt(e.arrayValue, this.value);
     }
 }
 
-/** A Filter that implements the IN operator. */ class Ve extends Te {
+/** A Filter that implements the IN operator. */ class de extends ce {
     constructor(t, e) {
         super(t, "in" /* IN */ , e);
     }
     matches(t) {
         const e = t.data.field(this.field);
-        return null !== e && Ft(this.value.arrayValue, e);
+        return null !== e && Mt(this.value.arrayValue, e);
     }
 }
 
-/** A Filter that implements the not-in operator. */ class ve extends Te {
+/** A Filter that implements the not-in operator. */ class _e extends ce {
     constructor(t, e) {
         super(t, "not-in" /* NOT_IN */ , e);
     }
     matches(t) {
-        if (Ft(this.value.arrayValue, {
+        if (Mt(this.value.arrayValue, {
             nullValue: "NULL_VALUE"
         })) return !1;
         const e = t.data.field(this.field);
-        return null !== e && !Ft(this.value.arrayValue, e);
+        return null !== e && !Mt(this.value.arrayValue, e);
     }
 }
 
-/** A Filter that implements the array-contains-any operator. */ class Se extends Te {
+/** A Filter that implements the array-contains-any operator. */ class we extends ce {
     constructor(t, e) {
         super(t, "array-contains-any" /* ARRAY_CONTAINS_ANY */ , e);
     }
     matches(t) {
         const e = t.data.field(this.field);
-        return !(!Gt(e) || !e.arrayValue.values) && e.arrayValue.values.some((t => Ft(this.value.arrayValue, t)));
+        return !(!Kt(e) || !e.arrayValue.values) && e.arrayValue.values.some((t => Mt(this.value.arrayValue, t)));
     }
 }
 
@@ -5961,7 +5435,7 @@ function Pe(t, e) {
  * Bound provides a function to determine whether a document comes before or
  * after a bound. This is influenced by whether the position is just before or
  * just after the provided values.
- */ class De {
+ */ class me {
     constructor(t, e) {
         this.position = t, this.inclusive = e;
     }
@@ -5969,21 +5443,21 @@ function Pe(t, e) {
 
 /**
  * An ordering on a field, in some Direction. Direction defaults to ASCENDING.
- */ class Ce {
+ */ class ge {
     constructor(t, e = "asc" /* ASCENDING */) {
         this.field = t, this.dir = e;
     }
 }
 
-function xe(t, e) {
+function ye(t, e) {
     return t.dir === e.dir && t.field.isEqual(e.field);
 }
 
-function Ne(t, e, n) {
+function pe(t, e, n) {
     let s = 0;
     for (let i = 0; i < t.position.length; i++) {
         const r = e[i], o = t.position[i];
-        if (r.field.isKeyField()) s = xt.comparator(xt.fromName(o.referenceValue), n.key); else {
+        if (r.field.isKeyField()) s = Nt.comparator(Nt.fromName(o.referenceValue), n.key); else {
             s = $t(o, n.data.field(r.field));
         }
         if ("desc" /* DESCENDING */ === r.dir && (s *= -1), 0 !== s) break;
@@ -5994,7 +5468,7 @@ function Ne(t, e, n) {
 /**
  * Returns true if a document sorts after a bound using the provided sort
  * order.
- */ function ke(t, e) {
+ */ function Ie(t, e) {
     if (null === t) return null === e;
     if (null === e) return !1;
     if (t.inclusive !== e.inclusive || t.position.length !== e.position.length) return !1;
@@ -6026,25 +5500,25 @@ function Ne(t, e, n) {
  * query the RemoteStore results.
  *
  * Visible for testing.
- */ class Me {
+ */ class Ee {
     /**
      * Initializes a Query with a path and optional additional query constraints.
      * Path must currently be empty if this is a collection group query.
      */
-    constructor(t, e = null, n = [], s = [], i = null, r = "F" /* First */ , o = null, u = null) {
+    constructor(t, e = null, n = [], s = [], i = null, r = "F" /* First */ , o = null, c = null) {
         this.path = t, this.collectionGroup = e, this.explicitOrderBy = n, this.filters = s, 
-        this.limit = i, this.limitType = r, this.startAt = o, this.endAt = u, this.D = null, 
+        this.limit = i, this.limitType = r, this.startAt = o, this.endAt = c, this.D = null, 
         // The corresponding `Target` of this `Query` instance.
         this.C = null, this.startAt, this.endAt;
     }
 }
 
-/** Creates a new Query instance with the options provided. */ function Oe(t, e, n, s, i, r, o, u) {
-    return new Me(t, e, n, s, i, r, o, u);
+/** Creates a new Query instance with the options provided. */ function Te(t, e, n, s, i, r, o, c) {
+    return new Ee(t, e, n, s, i, r, o, c);
 }
 
-/** Creates a new Query for a query that matches all documents at `path` */ function Fe(t) {
-    return new Me(t);
+/** Creates a new Query for a query that matches all documents at `path` */ function Ae(t) {
+    return new Ee(t);
 }
 
 /**
@@ -6052,19 +5526,19 @@ function Ne(t, e, n) {
  * specific path. This is used when executing collection group queries, since
  * we have to split the query into a set of collection queries at multiple
  * paths.
- */ function $e(t) {
+ */ function Re(t) {
     return !St(t.limit) && "F" /* First */ === t.limitType;
 }
 
-function Be(t) {
+function Pe(t) {
     return !St(t.limit) && "L" /* Last */ === t.limitType;
 }
 
-function Le(t) {
+function be(t) {
     return t.explicitOrderBy.length > 0 ? t.explicitOrderBy[0].field : null;
 }
 
-function Ue(t) {
+function ve(t) {
     for (const e of t.filters) if (e.S()) return e.field;
     return null;
 }
@@ -6077,7 +5551,7 @@ function Ue(t) {
  * Returns whether the query matches a collection group rather than a specific
  * collection.
  */
-function qe(t) {
+function Ve(t) {
     return null !== t.collectionGroup;
 }
 
@@ -6085,23 +5559,23 @@ function qe(t) {
  * Returns the implicit order by constraint that is used to execute the Query,
  * which can be different from the order by constraints the user provided (e.g.
  * the SDK and backend always orders by `__name__`).
- */ function Ke(t) {
+ */ function Se(t) {
     const e = K(t);
     if (null === e.D) {
         e.D = [];
-        const t = Ue(e), n = Le(e);
+        const t = ve(e), n = be(e);
         if (null !== t && null === n) 
         // In order to implicitly add key ordering, we must also add the
         // inequality filter field for it to be a valid query.
         // Note that the default inequality field and key ordering is ascending.
-        t.isKeyField() || e.D.push(new Ce(t)), e.D.push(new Ce(mt.keyField(), "asc" /* ASCENDING */)); else {
+        t.isKeyField() || e.D.push(new ge(t)), e.D.push(new ge(mt.keyField(), "asc" /* ASCENDING */)); else {
             let t = !1;
             for (const n of e.explicitOrderBy) e.D.push(n), n.field.isKeyField() && (t = !0);
             if (!t) {
                 // The order of the implicit key ordering always matches the last
                 // explicit order by
                 const t = e.explicitOrderBy.length > 0 ? e.explicitOrderBy[e.explicitOrderBy.length - 1].dir : "asc" /* ASCENDING */;
-                e.D.push(new Ce(mt.keyField(), t));
+                e.D.push(new ge(mt.keyField(), t));
             }
         }
     }
@@ -6110,46 +5584,46 @@ function qe(t) {
 
 /**
  * Converts this `Query` instance to it's corresponding `Target` representation.
- */ function Ge(t) {
+ */ function De(t) {
     const e = K(t);
-    if (!e.C) if ("F" /* First */ === e.limitType) e.C = de(e.path, e.collectionGroup, Ke(e), e.filters, e.limit, e.startAt, e.endAt); else {
+    if (!e.C) if ("F" /* First */ === e.limitType) e.C = ne(e.path, e.collectionGroup, Se(e), e.filters, e.limit, e.startAt, e.endAt); else {
         // Flip the orderBy directions since we want the last results
         const t = [];
-        for (const n of Ke(e)) {
+        for (const n of Se(e)) {
             const e = "desc" /* DESCENDING */ === n.dir ? "asc" /* ASCENDING */ : "desc" /* DESCENDING */;
-            t.push(new Ce(n.field, e));
+            t.push(new ge(n.field, e));
         }
         // We need to swap the cursors to match the now-flipped query ordering.
-                const n = e.endAt ? new De(e.endAt.position, !e.endAt.inclusive) : null, s = e.startAt ? new De(e.startAt.position, !e.startAt.inclusive) : null;
+                const n = e.endAt ? new me(e.endAt.position, !e.endAt.inclusive) : null, s = e.startAt ? new me(e.startAt.position, !e.startAt.inclusive) : null;
         // Now return as a LimitType.First query.
-        e.C = de(e.path, e.collectionGroup, t, e.filters, e.limit, n, s);
+        e.C = ne(e.path, e.collectionGroup, t, e.filters, e.limit, n, s);
     }
     return e.C;
 }
 
-function Qe(t, e, n) {
-    return new Me(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), e, n, t.startAt, t.endAt);
+function Ce(t, e, n) {
+    return new Ee(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), e, n, t.startAt, t.endAt);
 }
 
-function je(t, e) {
-    return me(Ge(t), Ge(e)) && t.limitType === e.limitType;
+function Ne(t, e) {
+    return re(De(t), De(e)) && t.limitType === e.limitType;
 }
 
 // TODO(b/29183165): This is used to get a unique string from a query to, for
 // example, use as a dictionary key, but the implementation is subject to
 // collisions. Make it collision-free.
-function We(t) {
-    return `${_e(Ge(t))}|lt:${t.limitType}`;
+function xe(t) {
+    return `${se(De(t))}|lt:${t.limitType}`;
 }
 
-function ze(t) {
-    return `Query(target=${we(Ge(t))}; limitType=${t.limitType})`;
+function ke(t) {
+    return `Query(target=${ie(De(t))}; limitType=${t.limitType})`;
 }
 
-/** Returns whether `doc` matches the constraints of `query`. */ function He(t, e) {
+/** Returns whether `doc` matches the constraints of `query`. */ function Oe(t, e) {
     return e.isFoundDocument() && function(t, e) {
         const n = e.key.path;
-        return null !== t.collectionGroup ? e.key.hasCollectionId(t.collectionGroup) && t.path.isPrefixOf(n) : xt.isDocumentKey(t.path) ? t.path.isEqual(n) : t.path.isImmediateParentOf(n);
+        return null !== t.collectionGroup ? e.key.hasCollectionId(t.collectionGroup) && t.path.isPrefixOf(n) : Nt.isDocumentKey(t.path) ? t.path.isEqual(n) : t.path.isImmediateParentOf(n);
     }
     /**
  * A document must have a value for every ordering clause in order to show up
@@ -6170,35 +5644,26 @@ function ze(t) {
  * order.
  */
         function(t, e, n) {
-            const s = Ne(t, e, n);
+            const s = pe(t, e, n);
             return t.inclusive ? s <= 0 : s < 0;
-        }(t.startAt, Ke(t), e)) return !1;
+        }(t.startAt, Se(t), e)) return !1;
         if (t.endAt && !function(t, e, n) {
-            const s = Ne(t, e, n);
+            const s = pe(t, e, n);
             return t.inclusive ? s >= 0 : s > 0;
-        }(t.endAt, Ke(t), e)) return !1;
+        }(t.endAt, Se(t), e)) return !1;
         return !0;
     }
     /**
- * Returns the collection group that this query targets.
- *
- * PORTING NOTE: This is only used in the Web SDK to facilitate multi-tab
- * synchronization for query results.
+ * Returns a new comparator function that can be used to compare two documents
+ * based on the Query's ordering constraint.
  */ (t, e);
 }
 
-function Je(t) {
-    return t.collectionGroup || (t.path.length % 2 == 1 ? t.path.lastSegment() : t.path.get(t.path.length - 2));
-}
-
-/**
- * Returns a new comparator function that can be used to compare two documents
- * based on the Query's ordering constraint.
- */ function Ye(t) {
+function Me(t) {
     return (e, n) => {
         let s = !1;
-        for (const i of Ke(t)) {
-            const t = Xe(i, e, n);
+        for (const i of Se(t)) {
+            const t = $e(i, e, n);
             if (0 !== t) return t;
             s = s || i.field.isKeyField();
         }
@@ -6206,8 +5671,8 @@ function Je(t) {
     };
 }
 
-function Xe(t, e, n) {
-    const s = t.field.isKeyField() ? xt.comparator(e.key, n.key) : function(t, e, n) {
+function $e(t, e, n) {
+    const s = t.field.isKeyField() ? Nt.comparator(e.key, n.key) : function(t, e, n) {
         const s = e.data.field(t), i = n.data.field(t);
         return null !== s && null !== i ? $t(s, i) : L();
     }
@@ -6262,7 +5727,7 @@ function Xe(t, e, n) {
 /**
  * Returns an DoubleValue for `value` that is encoded based the serializer's
  * `useProto3Json` setting.
- */ function Ze(t, e) {
+ */ function Fe(t, e) {
     if (t.N) {
         if (isNaN(e)) return {
             doubleValue: "NaN"
@@ -6281,7 +5746,7 @@ function Xe(t, e, n) {
 
 /**
  * Returns an IntegerValue for `value`.
- */ function tn(t) {
+ */ function Be(t) {
     return {
         integerValue: "" + t
     };
@@ -6291,8 +5756,8 @@ function Xe(t, e, n) {
  * Returns a value for a number that's appropriate to put into a proto.
  * The return value is an IntegerValue if it can safely represent the value,
  * otherwise a DoubleValue is returned.
- */ function en(t, e) {
-    return Ct(e) ? tn(e) : Ze(t, e);
+ */ function Le(t, e) {
+    return Ct(e) ? Be(e) : Fe(t, e);
 }
 
 /**
@@ -6311,7 +5776,7 @@ function Xe(t, e, n) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** Used to represent a field transform on a mutation. */ class nn {
+/** Used to represent a field transform on a mutation. */ class Ue {
     constructor() {
         // Make sure that the structural type of `TransformOperation` is unique.
         // See https://github.com/microsoft/TypeScript/issues/5451
@@ -6322,8 +5787,8 @@ function Xe(t, e, n) {
 /**
  * Computes the local transform result against the provided `previousValue`,
  * optionally using the provided localWriteTime.
- */ function sn(t, e, n) {
-    return t instanceof un ? function(t, e) {
+ */ function qe(t, e, n) {
+    return t instanceof je ? function(t, e) {
         const n = {
             fields: {
                 __type__: {
@@ -6340,23 +5805,23 @@ function Xe(t, e, n) {
         return e && (n.fields.__previous_value__ = e), {
             mapValue: n
         };
-    }(n, e) : t instanceof an ? cn(t, e) : t instanceof hn ? ln(t, e) : function(t, e) {
+    }(n, e) : t instanceof Qe ? We(t, e) : t instanceof ze ? He(t, e) : function(t, e) {
         // PORTING NOTE: Since JavaScript's integer arithmetic is limited to 53 bit
         // precision and resolves overflows by reducing precision, we do not
         // manually cap overflows at 2^63.
-        const n = on(t, e), s = dn(n) + dn(t.k);
-        return Kt(n) && Kt(t.k) ? tn(s) : Ze(t.M, s);
+        const n = Ge(t, e), s = Ye(n) + Ye(t.k);
+        return qt(n) && qt(t.k) ? Be(s) : Fe(t.O, s);
     }(t, e);
 }
 
 /**
  * Computes a final transform result after the transform has been acknowledged
  * by the server, potentially using the server-provided transformResult.
- */ function rn(t, e, n) {
+ */ function Ke(t, e, n) {
     // The server just sends null as the transform result for array operations,
     // so we have to calculate a result the same as we do for local
     // applications.
-    return t instanceof an ? cn(t, e) : t instanceof hn ? ln(t, e) : n;
+    return t instanceof Qe ? We(t, e) : t instanceof ze ? He(t, e) : n;
 }
 
 /**
@@ -6373,8 +5838,8 @@ function Xe(t, e, n) {
  *
  * @returns a base value to store along with the mutation, or null for
  * idempotent transforms.
- */ function on(t, e) {
-    return t instanceof fn ? Kt(n = e) || function(t) {
+ */ function Ge(t, e) {
+    return t instanceof Je ? qt(n = e) || function(t) {
         return !!t && "doubleValue" in t;
     }
     /** Returns true if `value` is either an IntegerValue or a DoubleValue. */ (n) ? e : {
@@ -6384,16 +5849,16 @@ function Xe(t, e, n) {
 }
 
 /** Transforms a value into a server-generated timestamp. */
-class un extends nn {}
+class je extends Ue {}
 
-/** Transforms an array value via a union operation. */ class an extends nn {
+/** Transforms an array value via a union operation. */ class Qe extends Ue {
     constructor(t) {
         super(), this.elements = t;
     }
 }
 
-function cn(t, e) {
-    const n = _n(e);
+function We(t, e) {
+    const n = Xe(e);
     for (const e of t.elements) n.some((t => Ot(t, e))) || n.push(e);
     return {
         arrayValue: {
@@ -6402,14 +5867,14 @@ function cn(t, e) {
     };
 }
 
-/** Transforms an array value via a remove operation. */ class hn extends nn {
+/** Transforms an array value via a remove operation. */ class ze extends Ue {
     constructor(t) {
         super(), this.elements = t;
     }
 }
 
-function ln(t, e) {
-    let n = _n(e);
+function He(t, e) {
+    let n = Xe(e);
     for (const e of t.elements) n = n.filter((t => !Ot(t, e)));
     return {
         arrayValue: {
@@ -6423,18 +5888,18 @@ function ln(t, e) {
  * transforms. Converts all field values to integers or doubles, but unlike the
  * backend does not cap integer values at 2^63. Instead, JavaScript number
  * arithmetic is used and precision loss can occur for values greater than 2^53.
- */ class fn extends nn {
+ */ class Je extends Ue {
     constructor(t, e) {
-        super(), this.M = t, this.k = e;
+        super(), this.O = t, this.k = e;
     }
 }
 
-function dn(t) {
-    return Et(t.integerValue || t.doubleValue);
+function Ye(t) {
+    return Tt(t.integerValue || t.doubleValue);
 }
 
-function _n(t) {
-    return Gt(t) && t.arrayValue.values ? t.arrayValue.values.slice() : [];
+function Xe(t) {
+    return Kt(t) && t.arrayValue.values ? t.arrayValue.values.slice() : [];
 }
 
 /**
@@ -6453,20 +5918,20 @@ function _n(t) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** A field path and the TransformOperation to perform upon it. */ class wn {
+/** A field path and the TransformOperation to perform upon it. */ class Ze {
     constructor(t, e) {
         this.field = t, this.transform = e;
     }
 }
 
-function mn(t, e) {
+function tn(t, e) {
     return t.field.isEqual(e.field) && function(t, e) {
-        return t instanceof an && e instanceof an || t instanceof hn && e instanceof hn ? ot(t.elements, e.elements, Ot) : t instanceof fn && e instanceof fn ? Ot(t.k, e.k) : t instanceof un && e instanceof un;
+        return t instanceof Qe && e instanceof Qe || t instanceof ze && e instanceof ze ? ot(t.elements, e.elements, Ot) : t instanceof Je && e instanceof Je ? Ot(t.k, e.k) : t instanceof je && e instanceof je;
     }(t.transform, e.transform);
 }
 
 /** The result of successfully applying a mutation to the backend. */
-class gn {
+class en {
     constructor(
     /**
      * The version at which the mutation was committed:
@@ -6495,18 +5960,18 @@ class gn {
  * Encodes a precondition for a mutation. This follows the model that the
  * backend accepts with the special case of an explicit "empty" precondition
  * (meaning no precondition).
- */ class yn {
+ */ class nn {
     constructor(t, e) {
         this.updateTime = t, this.exists = e;
     }
     /** Creates a new empty Precondition. */    static none() {
-        return new yn;
+        return new nn;
     }
     /** Creates a new Precondition with an exists flag. */    static exists(t) {
-        return new yn(void 0, t);
+        return new nn(void 0, t);
     }
     /** Creates a new Precondition based on a version a document exists at. */    static updateTime(t) {
-        return new yn(t);
+        return new nn(t);
     }
     /** Returns whether this Precondition is empty. */    get isNone() {
         return void 0 === this.updateTime && void 0 === this.exists;
@@ -6516,7 +5981,7 @@ class gn {
     }
 }
 
-/** Returns true if the preconditions is valid for the given document. */ function pn(t, e) {
+/** Returns true if the preconditions is valid for the given document. */ function sn(t, e) {
     return void 0 !== t.updateTime ? e.isFoundDocument() && e.version.isEqual(t.updateTime) : void 0 === t.exists || t.exists === e.isFoundDocument();
 }
 
@@ -6563,7 +6028,7 @@ class gn {
  * applyToLocalView() to implement the actual behavior of applying the mutation
  * to some source document (see `setMutationApplyToRemoteDocument()` for an
  * example).
- */ class In {}
+ */ class rn {}
 
 /**
  * Applies this mutation to the given document for the purposes of computing a
@@ -6576,22 +6041,22 @@ class gn {
  *     invalid document if the client has no knowledge of the pre-mutation state
  *     of the document.
  * @param mutationResult - The result of applying the mutation from the backend.
- */ function Tn(t, e, n) {
-    t instanceof bn ? function(t, e, n) {
+ */ function on(t, e, n) {
+    t instanceof ln ? function(t, e, n) {
         // Unlike setMutationApplyToLocalView, if we're applying a mutation to a
         // remote document the server has accepted the mutation so the precondition
         // must have held.
-        const s = t.value.clone(), i = Sn(t.fieldTransforms, e, n.transformResults);
+        const s = t.value.clone(), i = _n(t.fieldTransforms, e, n.transformResults);
         s.setAll(i), e.convertToFoundDocument(n.version, s).setHasCommittedMutations();
-    }(t, e, n) : t instanceof Vn ? function(t, e, n) {
-        if (!pn(t.precondition, e)) 
+    }(t, e, n) : t instanceof fn ? function(t, e, n) {
+        if (!sn(t.precondition, e)) 
         // Since the mutation was not rejected, we know that the precondition
         // matched on the backend. We therefore must not have the expected version
         // of the document in our cache and convert to an UnknownDocument with a
         // known updateTime.
         return void e.convertToUnknownDocument(n.version);
-        const s = Sn(t.fieldTransforms, e, n.transformResults), i = e.data;
-        i.setAll(vn(t)), i.setAll(s), e.convertToFoundDocument(n.version, i).setHasCommittedMutations();
+        const s = _n(t.fieldTransforms, e, n.transformResults), i = e.data;
+        i.setAll(dn(t)), i.setAll(s), e.convertToFoundDocument(n.version, i).setHasCommittedMutations();
     }(t, e, n) : function(t, e, n) {
         // Unlike applyToLocalView, if we're applying a mutation to a remote
         // document the server has accepted the mutation so the precondition must
@@ -6611,14 +6076,14 @@ class gn {
  *     of the document.
  * @param localWriteTime - A timestamp indicating the local write time of the
  *     batch this mutation is a part of.
- */ function En(t, e, n) {
-    t instanceof bn ? function(t, e, n) {
-        if (!pn(t.precondition, e)) 
+ */ function cn(t, e, n) {
+    t instanceof ln ? function(t, e, n) {
+        if (!sn(t.precondition, e)) 
         // The mutation failed to apply (e.g. a document ID created with add()
         // caused a name collision).
         return;
-        const s = t.value.clone(), i = Dn(t.fieldTransforms, n, e);
-        s.setAll(i), e.convertToFoundDocument(Pn(e), s).setHasLocalMutations();
+        const s = t.value.clone(), i = wn(t.fieldTransforms, n, e);
+        s.setAll(i), e.convertToFoundDocument(hn(e), s).setHasLocalMutations();
     }
     /**
  * A mutation that modifies fields of the document at the given key with the
@@ -6632,18 +6097,18 @@ class gn {
  *    is deleted.
  *  * When a field is not in the mask but is in the values, the values map is
  *    ignored.
- */ (t, e, n) : t instanceof Vn ? function(t, e, n) {
-        if (!pn(t.precondition, e)) return;
-        const s = Dn(t.fieldTransforms, n, e), i = e.data;
-        i.setAll(vn(t)), i.setAll(s), e.convertToFoundDocument(Pn(e), i).setHasLocalMutations();
+ */ (t, e, n) : t instanceof fn ? function(t, e, n) {
+        if (!sn(t.precondition, e)) return;
+        const s = wn(t.fieldTransforms, n, e), i = e.data;
+        i.setAll(dn(t)), i.setAll(s), e.convertToFoundDocument(hn(e), i).setHasLocalMutations();
     }
     /**
  * Returns a FieldPath/Value map with the content of the PatchMutation.
  */ (t, e, n) : function(t, e) {
-        pn(t.precondition, e) && 
+        sn(t.precondition, e) && 
         // We don't call `setHasLocalMutations()` since we want to be backwards
         // compatible with the existing SDK behavior.
-        e.convertToNoDocument(ct.min());
+        e.convertToNoDocument(at.min());
     }
     /**
  * A mutation that verifies the existence of the document at the given key with
@@ -6669,18 +6134,18 @@ class gn {
  *
  * @returns a base value to store along with the mutation, or null for
  * idempotent mutations.
- */ function An(t, e) {
+ */ function un(t, e) {
     let n = null;
     for (const s of t.fieldTransforms) {
-        const t = e.data.field(s.field), i = on(s.transform, t || null);
-        null != i && (null == n && (n = te.empty()), n.set(s.field, i));
+        const t = e.data.field(s.field), i = Ge(s.transform, t || null);
+        null != i && (null == n && (n = zt.empty()), n.set(s.field, i));
     }
     return n || null;
 }
 
-function Rn(t, e) {
+function an(t, e) {
     return t.type === e.type && (!!t.key.isEqual(e.key) && (!!t.precondition.isEqual(e.precondition) && (!!function(t, e) {
-        return void 0 === t && void 0 === e || !(!t || !e) && ot(t, e, ((t, e) => mn(t, e)));
+        return void 0 === t && void 0 === e || !(!t || !e) && ot(t, e, ((t, e) => tn(t, e)));
     }(t.fieldTransforms, e.fieldTransforms) && (0 /* Set */ === t.type ? t.value.isEqual(e.value) : 1 /* Patch */ !== t.type || t.data.isEqual(e.data) && t.fieldMask.isEqual(e.fieldMask)))));
 }
 
@@ -6689,28 +6154,28 @@ function Rn(t, e) {
  * mutation. Mutations are defined to return the version of the base document
  * only if it is an existing document. Deleted and unknown documents have a
  * post-mutation version of SnapshotVersion.min().
- */ function Pn(t) {
-    return t.isFoundDocument() ? t.version : ct.min();
+ */ function hn(t) {
+    return t.isFoundDocument() ? t.version : at.min();
 }
 
 /**
  * A mutation that creates or replaces the document at the given key with the
  * object value contents.
- */ class bn extends In {
+ */ class ln extends rn {
     constructor(t, e, n, s = []) {
         super(), this.key = t, this.value = e, this.precondition = n, this.fieldTransforms = s, 
         this.type = 0 /* Set */;
     }
 }
 
-class Vn extends In {
+class fn extends rn {
     constructor(t, e, n, s, i = []) {
         super(), this.key = t, this.data = e, this.fieldMask = n, this.precondition = s, 
         this.fieldTransforms = i, this.type = 1 /* Patch */;
     }
 }
 
-function vn(t) {
+function dn(t) {
     const e = new Map;
     return t.fieldMask.fields.forEach((n => {
         if (!n.isEmpty()) {
@@ -6730,12 +6195,12 @@ function vn(t) {
  * previous mutations.
  * @param serverTransformResults - The transform results received by the server.
  * @returns The transform results list.
- */ function Sn(t, e, n) {
+ */ function _n(t, e, n) {
     const s = new Map;
     U(t.length === n.length);
     for (let i = 0; i < n.length; i++) {
-        const r = t[i], o = r.transform, u = e.data.field(r.field);
-        s.set(r.field, rn(o, u, n[i]));
+        const r = t[i], o = r.transform, c = e.data.field(r.field);
+        s.set(r.field, Ke(o, c, n[i]));
     }
     return s;
 }
@@ -6751,22 +6216,22 @@ function vn(t) {
  * @param mutableDocument - The current state of the document after applying all
  *     previous mutations.
  * @returns The transform results list.
- */ function Dn(t, e, n) {
+ */ function wn(t, e, n) {
     const s = new Map;
     for (const i of t) {
         const t = i.transform, r = n.data.field(i.field);
-        s.set(i.field, sn(t, r, e));
+        s.set(i.field, qe(t, r, e));
     }
     return s;
 }
 
-/** A mutation that deletes the document at the given key. */ class Cn extends In {
+/** A mutation that deletes the document at the given key. */ class mn extends rn {
     constructor(t, e) {
         super(), this.key = t, this.precondition = e, this.type = 2 /* Delete */ , this.fieldTransforms = [];
     }
 }
 
-class xn extends In {
+class gn extends rn {
     constructor(t, e) {
         super(), this.key = t, this.precondition = e, this.type = 3 /* Verify */ , this.fieldTransforms = [];
     }
@@ -6787,7 +6252,7 @@ class xn extends In {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Nn {
+ */ class yn {
     // TODO(b/33078163): just use simplest form of existence filter for now
     constructor(t) {
         this.count = t;
@@ -6819,7 +6284,7 @@ class xn extends In {
  * Important! The names of these identifiers matter because the string forms
  * are used for reverse lookups from the webchannel stream. Do NOT change the
  * names of these identifiers or change this into a const enum.
- */ var kn, Mn;
+ */ var pn, In;
 
 /**
  * Determines whether an error code represents a permanent error when received
@@ -6827,7 +6292,7 @@ class xn extends In {
  *
  * See isPermanentWriteError for classifying write errors.
  */
-function On(t) {
+function En(t) {
     switch (t) {
       default:
         return L();
@@ -6878,61 +6343,61 @@ function On(t) {
  * @returns The Code equivalent to the given GRPC status code. Fails if there
  *     is no match.
  */
-function Fn(t) {
+function Tn(t) {
     if (void 0 === t) 
     // This shouldn't normally happen, but in certain error cases (like trying
     // to send invalid proto messages) we may get an error with no GRPC code.
-    return F("GRPC error has no .code"), G.UNKNOWN;
+    return $("GRPC error has no .code"), G.UNKNOWN;
     switch (t) {
-      case kn.OK:
+      case pn.OK:
         return G.OK;
 
-      case kn.CANCELLED:
+      case pn.CANCELLED:
         return G.CANCELLED;
 
-      case kn.UNKNOWN:
+      case pn.UNKNOWN:
         return G.UNKNOWN;
 
-      case kn.DEADLINE_EXCEEDED:
+      case pn.DEADLINE_EXCEEDED:
         return G.DEADLINE_EXCEEDED;
 
-      case kn.RESOURCE_EXHAUSTED:
+      case pn.RESOURCE_EXHAUSTED:
         return G.RESOURCE_EXHAUSTED;
 
-      case kn.INTERNAL:
+      case pn.INTERNAL:
         return G.INTERNAL;
 
-      case kn.UNAVAILABLE:
+      case pn.UNAVAILABLE:
         return G.UNAVAILABLE;
 
-      case kn.UNAUTHENTICATED:
+      case pn.UNAUTHENTICATED:
         return G.UNAUTHENTICATED;
 
-      case kn.INVALID_ARGUMENT:
+      case pn.INVALID_ARGUMENT:
         return G.INVALID_ARGUMENT;
 
-      case kn.NOT_FOUND:
+      case pn.NOT_FOUND:
         return G.NOT_FOUND;
 
-      case kn.ALREADY_EXISTS:
+      case pn.ALREADY_EXISTS:
         return G.ALREADY_EXISTS;
 
-      case kn.PERMISSION_DENIED:
+      case pn.PERMISSION_DENIED:
         return G.PERMISSION_DENIED;
 
-      case kn.FAILED_PRECONDITION:
+      case pn.FAILED_PRECONDITION:
         return G.FAILED_PRECONDITION;
 
-      case kn.ABORTED:
+      case pn.ABORTED:
         return G.ABORTED;
 
-      case kn.OUT_OF_RANGE:
+      case pn.OUT_OF_RANGE:
         return G.OUT_OF_RANGE;
 
-      case kn.UNIMPLEMENTED:
+      case pn.UNIMPLEMENTED:
         return G.UNIMPLEMENTED;
 
-      case kn.DATA_LOSS:
+      case pn.DATA_LOSS:
         return G.DATA_LOSS;
 
       default:
@@ -6947,86 +6412,14 @@ function Fn(t) {
  * "UNKNOWN", etc.)
  * @returns The equivalent Code. Non-matching responses are mapped to
  *     Code.UNKNOWN.
- */ (Mn = kn || (kn = {}))[Mn.OK = 0] = "OK", Mn[Mn.CANCELLED = 1] = "CANCELLED", 
-Mn[Mn.UNKNOWN = 2] = "UNKNOWN", Mn[Mn.INVALID_ARGUMENT = 3] = "INVALID_ARGUMENT", 
-Mn[Mn.DEADLINE_EXCEEDED = 4] = "DEADLINE_EXCEEDED", Mn[Mn.NOT_FOUND = 5] = "NOT_FOUND", 
-Mn[Mn.ALREADY_EXISTS = 6] = "ALREADY_EXISTS", Mn[Mn.PERMISSION_DENIED = 7] = "PERMISSION_DENIED", 
-Mn[Mn.UNAUTHENTICATED = 16] = "UNAUTHENTICATED", Mn[Mn.RESOURCE_EXHAUSTED = 8] = "RESOURCE_EXHAUSTED", 
-Mn[Mn.FAILED_PRECONDITION = 9] = "FAILED_PRECONDITION", Mn[Mn.ABORTED = 10] = "ABORTED", 
-Mn[Mn.OUT_OF_RANGE = 11] = "OUT_OF_RANGE", Mn[Mn.UNIMPLEMENTED = 12] = "UNIMPLEMENTED", 
-Mn[Mn.INTERNAL = 13] = "INTERNAL", Mn[Mn.UNAVAILABLE = 14] = "UNAVAILABLE", Mn[Mn.DATA_LOSS = 15] = "DATA_LOSS";
-
-/**
- * @license
- * Copyright 2017 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-/**
- * A map implementation that uses objects as keys. Objects must have an
- * associated equals function and must be immutable. Entries in the map are
- * stored together with the key being produced from the mapKeyFn. This map
- * automatically handles collisions of keys.
- */
-class $n {
-    constructor(t, e) {
-        this.mapKeyFn = t, this.equalsFn = e, 
-        /**
-         * The inner map for a key/value pair. Due to the possibility of collisions we
-         * keep a list of entries that we do a linear search through to find an actual
-         * match. Note that collisions should be rare, so we still expect near
-         * constant time lookups in practice.
-         */
-        this.inner = {}, 
-        /** The number of entries stored in the map */
-        this.innerSize = 0;
-    }
-    /** Get a value for this key, or undefined if it does not exist. */    get(t) {
-        const e = this.mapKeyFn(t), n = this.inner[e];
-        if (void 0 !== n) for (const [e, s] of n) if (this.equalsFn(e, t)) return s;
-    }
-    has(t) {
-        return void 0 !== this.get(t);
-    }
-    /** Put this key and value in the map. */    set(t, e) {
-        const n = this.mapKeyFn(t), s = this.inner[n];
-        if (void 0 === s) return this.inner[n] = [ [ t, e ] ], void this.innerSize++;
-        for (let n = 0; n < s.length; n++) if (this.equalsFn(s[n][0], t)) 
-        // This is updating an existing entry and does not increase `innerSize`.
-        return void (s[n] = [ t, e ]);
-        s.push([ t, e ]), this.innerSize++;
-    }
-    /**
-     * Remove this key from the map. Returns a boolean if anything was deleted.
-     */    delete(t) {
-        const e = this.mapKeyFn(t), n = this.inner[e];
-        if (void 0 === n) return !1;
-        for (let s = 0; s < n.length; s++) if (this.equalsFn(n[s][0], t)) return 1 === n.length ? delete this.inner[e] : n.splice(s, 1), 
-        this.innerSize--, !0;
-        return !1;
-    }
-    forEach(t) {
-        lt(this.inner, ((e, n) => {
-            for (const [e, s] of n) t(e, s);
-        }));
-    }
-    isEmpty() {
-        return ft(this.inner);
-    }
-    size() {
-        return this.innerSize;
-    }
-}
+ */ (In = pn || (pn = {}))[In.OK = 0] = "OK", In[In.CANCELLED = 1] = "CANCELLED", 
+In[In.UNKNOWN = 2] = "UNKNOWN", In[In.INVALID_ARGUMENT = 3] = "INVALID_ARGUMENT", 
+In[In.DEADLINE_EXCEEDED = 4] = "DEADLINE_EXCEEDED", In[In.NOT_FOUND = 5] = "NOT_FOUND", 
+In[In.ALREADY_EXISTS = 6] = "ALREADY_EXISTS", In[In.PERMISSION_DENIED = 7] = "PERMISSION_DENIED", 
+In[In.UNAUTHENTICATED = 16] = "UNAUTHENTICATED", In[In.RESOURCE_EXHAUSTED = 8] = "RESOURCE_EXHAUSTED", 
+In[In.FAILED_PRECONDITION = 9] = "FAILED_PRECONDITION", In[In.ABORTED = 10] = "ABORTED", 
+In[In.OUT_OF_RANGE = 11] = "OUT_OF_RANGE", In[In.UNIMPLEMENTED = 12] = "UNIMPLEMENTED", 
+In[In.INTERNAL = 13] = "INTERNAL", In[In.UNAVAILABLE = 14] = "UNAVAILABLE", In[In.DATA_LOSS = 15] = "DATA_LOSS";
 
 /**
  * @license
@@ -7046,17 +6439,17 @@ class $n {
  */
 // An immutable sorted map implementation, based on a Left-leaning Red-Black
 // tree.
-class Bn {
+class An {
     constructor(t, e) {
-        this.comparator = t, this.root = e || Un.EMPTY;
+        this.comparator = t, this.root = e || Pn.EMPTY;
     }
     // Returns a copy of the map, with the specified key/value added or replaced.
     insert(t, e) {
-        return new Bn(this.comparator, this.root.insert(t, e, this.comparator).copy(null, null, Un.BLACK, null, null));
+        return new An(this.comparator, this.root.insert(t, e, this.comparator).copy(null, null, Pn.BLACK, null, null));
     }
     // Returns a copy of the map, with the specified key removed.
     remove(t) {
-        return new Bn(this.comparator, this.root.remove(t, this.comparator).copy(null, null, Un.BLACK, null, null));
+        return new An(this.comparator, this.root.remove(t, this.comparator).copy(null, null, Pn.BLACK, null, null));
     }
     // Returns the value of the node with the given key, or null.
     get(t) {
@@ -7122,28 +6515,28 @@ class Bn {
     }
     // Returns an iterator over the SortedMap.
     getIterator() {
-        return new Ln(this.root, null, this.comparator, !1);
+        return new Rn(this.root, null, this.comparator, !1);
     }
     getIteratorFrom(t) {
-        return new Ln(this.root, t, this.comparator, !1);
+        return new Rn(this.root, t, this.comparator, !1);
     }
     getReverseIterator() {
-        return new Ln(this.root, null, this.comparator, !0);
+        return new Rn(this.root, null, this.comparator, !0);
     }
     getReverseIteratorFrom(t) {
-        return new Ln(this.root, t, this.comparator, !0);
+        return new Rn(this.root, t, this.comparator, !0);
     }
 }
 
  // end SortedMap
 // An iterator over an LLRBNode.
-class Ln {
+class Rn {
     constructor(t, e, n, s) {
         this.isReverse = s, this.nodeStack = [];
         let i = 1;
         for (;!t.isEmpty(); ) if (i = e ? n(t.key, e) : 1, 
         // flip the comparison if we're going in reverse
-        e && s && (i *= -1), i < 0) 
+        s && (i *= -1), i < 0) 
         // This node is less than our start key. ignore it
         t = this.isReverse ? t.left : t.right; else {
             if (0 === i) {
@@ -7182,14 +6575,14 @@ class Ln {
 
  // end SortedMapIterator
 // Represents a node in a Left-leaning Red-Black tree.
-class Un {
+class Pn {
     constructor(t, e, n, s, i) {
-        this.key = t, this.value = e, this.color = null != n ? n : Un.RED, this.left = null != s ? s : Un.EMPTY, 
-        this.right = null != i ? i : Un.EMPTY, this.size = this.left.size + 1 + this.right.size;
+        this.key = t, this.value = e, this.color = null != n ? n : Pn.RED, this.left = null != s ? s : Pn.EMPTY, 
+        this.right = null != i ? i : Pn.EMPTY, this.size = this.left.size + 1 + this.right.size;
     }
     // Returns a copy of the current node, optionally replacing pieces of it.
     copy(t, e, n, s, i) {
-        return new Un(null != t ? t : this.key, null != e ? e : this.value, null != n ? n : this.color, null != s ? s : this.left, null != i ? i : this.right);
+        return new Pn(null != t ? t : this.key, null != e ? e : this.value, null != n ? n : this.color, null != s ? s : this.left, null != i ? i : this.right);
     }
     isEmpty() {
         return !1;
@@ -7228,7 +6621,7 @@ class Un {
         s.fixUp();
     }
     removeMin() {
-        if (this.left.isEmpty()) return Un.EMPTY;
+        if (this.left.isEmpty()) return Pn.EMPTY;
         let t = this;
         return t.left.isRed() || t.left.left.isRed() || (t = t.moveRedLeft()), t = t.copy(null, null, null, t.left.removeMin(), null), 
         t.fixUp();
@@ -7240,7 +6633,7 @@ class Un {
         s = s.copy(null, null, null, s.left.remove(t, e), null); else {
             if (s.left.isRed() && (s = s.rotateRight()), s.right.isEmpty() || s.right.isRed() || s.right.left.isRed() || (s = s.moveRedRight()), 
             0 === e(t, s.key)) {
-                if (s.right.isEmpty()) return Un.EMPTY;
+                if (s.right.isEmpty()) return Pn.EMPTY;
                 n = s.right.min(), s = s.copy(n.key, n.value, null, null, s.right.removeMin());
             }
             s = s.copy(null, null, null, null, s.right.remove(t, e));
@@ -7266,11 +6659,11 @@ class Un {
         return t.left.left.isRed() && (t = t.rotateRight(), t = t.colorFlip()), t;
     }
     rotateLeft() {
-        const t = this.copy(null, null, Un.RED, null, this.right.left);
+        const t = this.copy(null, null, Pn.RED, null, this.right.left);
         return this.right.copy(null, null, this.color, t, null);
     }
     rotateRight() {
-        const t = this.copy(null, null, Un.RED, this.left.right, null);
+        const t = this.copy(null, null, Pn.RED, this.left.right, null);
         return this.left.copy(null, null, this.color, null, t);
     }
     colorFlip() {
@@ -7296,10 +6689,10 @@ class Un {
  // end LLRBNode
 // Empty node is shared between all LLRB trees.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-Un.EMPTY = null, Un.RED = !0, Un.BLACK = !1;
+Pn.EMPTY = null, Pn.RED = !0, Pn.BLACK = !1;
 
 // end LLRBEmptyNode
-Un.EMPTY = new 
+Pn.EMPTY = new 
 // Represents an empty node (a leaf node in the Red-Black Tree).
 class {
     constructor() {
@@ -7326,7 +6719,7 @@ class {
     }
     // Returns a copy of the tree, with the specified key/value added.
     insert(t, e, n) {
-        return new Un(t, e);
+        return new Pn(t, e);
     }
     // Returns a copy of the tree, with the specified key removed.
     remove(t, e) {
@@ -7382,9 +6775,9 @@ class {
  * NOTE: if provided comparator returns 0 for two elements, we consider them to
  * be equal!
  */
-class qn {
+class bn {
     constructor(t) {
-        this.comparator = t, this.data = new Bn(this.comparator);
+        this.comparator = t, this.data = new An(this.comparator);
     }
     has(t) {
         return null !== this.data.get(t);
@@ -7425,10 +6818,10 @@ class qn {
         return e.hasNext() ? e.getNext().key : null;
     }
     getIterator() {
-        return new Kn(this.data.getIterator());
+        return new vn(this.data.getIterator());
     }
     getIteratorFrom(t) {
-        return new Kn(this.data.getIteratorFrom(t));
+        return new vn(this.data.getIteratorFrom(t));
     }
     /** Inserts or updates an element */    add(t) {
         return this.copy(this.data.remove(t).insert(t, !0));
@@ -7447,7 +6840,7 @@ class qn {
         })), e;
     }
     isEqual(t) {
-        if (!(t instanceof qn)) return !1;
+        if (!(t instanceof bn)) return !1;
         if (this.size !== t.size) return !1;
         const e = this.data.getIterator(), n = t.data.getIterator();
         for (;e.hasNext(); ) {
@@ -7467,12 +6860,12 @@ class qn {
         return this.forEach((e => t.push(e))), "SortedSet(" + t.toString() + ")";
     }
     copy(t) {
-        const e = new qn(this.comparator);
+        const e = new bn(this.comparator);
         return e.data = t, e;
     }
 }
 
-class Kn {
+class vn {
     constructor(t) {
         this.iter = t;
     }
@@ -7504,7 +6897,7 @@ class Kn {
 /**
  * Returns the next element from the iterator or `undefined` if none available.
  */
-function Gn(t) {
+function Vn(t) {
     return t.hasNext() ? t.getNext() : void 0;
 }
 
@@ -7523,36 +6916,32 @@ function Gn(t) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const Qn = new Bn(xt.comparator);
+ */ const Sn = new An(Nt.comparator);
 
-function jn() {
-    return Qn;
+function Dn() {
+    return Sn;
 }
 
-const Wn = new Bn(xt.comparator);
+const Cn = new An(Nt.comparator);
 
-function zn() {
-    return Wn;
+function Nn() {
+    return Cn;
 }
 
-function Hn() {
-    return new $n((t => t.toString()), ((t, e) => t.isEqual(e)));
-}
+const xn = new An(Nt.comparator);
 
-const Jn = new Bn(xt.comparator);
+const kn = new bn(Nt.comparator);
 
-const Yn = new qn(xt.comparator);
-
-function Xn(...t) {
-    let e = Yn;
+function On(...t) {
+    let e = kn;
     for (const n of t) e = e.add(n);
     return e;
 }
 
-const Zn = new qn(rt);
+const Mn = new bn(rt);
 
-function ts() {
-    return Zn;
+function $n() {
+    return Mn;
 }
 
 /**
@@ -7575,7 +6964,7 @@ function ts() {
  * An event from the RemoteStore. It is split into targetChanges (changes to the
  * state or the set of documents in our watched targets) and documentUpdates
  * (changes to the actual documents).
- */ class es {
+ */ class Fn {
     constructor(
     /**
      * The snapshot version this event brings us up to, or MIN if not set.
@@ -7611,7 +7000,7 @@ function ts() {
     // PORTING NOTE: Multi-tab only
     static createSynthesizedRemoteEventForCurrentChange(t, e) {
         const n = new Map;
-        return n.set(t, ns.createSynthesizedTargetChangeForCurrentChange(t, e)), new es(ct.min(), n, ts(), jn(), Xn());
+        return n.set(t, Bn.createSynthesizedTargetChangeForCurrentChange(t, e)), new Fn(at.min(), n, $n(), Dn(), On());
     }
 }
 
@@ -7622,7 +7011,7 @@ function ts() {
  * marked CURRENT.
  * The actual changes *to* documents are not part of the TargetChange since
  * documents may be part of multiple targets.
- */ class ns {
+ */ class Bn {
     constructor(
     /**
      * An opaque, server-assigned token that allows watching a query to be resumed
@@ -7660,7 +7049,7 @@ function ts() {
      * apply a CURRENT status change to a View (for queries executed in a different
      * tab) or for new queries (to raise snapshots with correct CURRENT status).
      */    static createSynthesizedTargetChangeForCurrentChange(t, e) {
-        return new ns(pt.EMPTY_BYTE_STRING, e, Xn(), Xn(), Xn());
+        return new Bn(pt.EMPTY_BYTE_STRING, e, On(), On(), On());
     }
 }
 
@@ -7685,7 +7074,7 @@ function ts() {
  * applies.
  *
  * If document has been deleted NoDocument will be provided.
- */ class ss {
+ */ class Ln {
     constructor(
     /** The new document applies to all of these targets. */
     t, 
@@ -7698,17 +7087,17 @@ function ts() {
      * document went out of view without the server sending a new document.
      */
     s) {
-        this.O = t, this.removedTargetIds = e, this.key = n, this.F = s;
+        this.M = t, this.removedTargetIds = e, this.key = n, this.$ = s;
     }
 }
 
-class is {
+class Un {
     constructor(t, e) {
-        this.targetId = t, this.$ = e;
+        this.targetId = t, this.F = e;
     }
 }
 
-class rs {
+class qn {
     constructor(
     /** What kind of change occurred to the watch target. */
     t, 
@@ -7726,7 +7115,7 @@ class rs {
     }
 }
 
-/** Tracks the internal state of a Watch target. */ class os {
+/** Tracks the internal state of a Watch target. */ class Kn {
     constructor() {
         /**
          * The number of pending responses (adds or removes) that we are waiting on.
@@ -7739,7 +7128,7 @@ class rs {
          * These changes are continuously updated as we receive document updates and
          * always reflect the current set of changes against the last issued snapshot.
          */
-        this.L = cs(), 
+        this.L = Qn(), 
         /** See public getters for explanations of these fields. */
         this.U = pt.EMPTY_BYTE_STRING, this.q = !1, 
         /**
@@ -7780,7 +7169,7 @@ class rs {
      * To reset the document changes after raising this snapshot, call
      * `clearPendingChanges()`.
      */    H() {
-        let t = Xn(), e = Xn(), n = Xn();
+        let t = On(), e = On(), n = On();
         return this.L.forEach(((s, i) => {
             switch (i) {
               case 0 /* Added */ :
@@ -7798,12 +7187,12 @@ class rs {
               default:
                 L();
             }
-        })), new ns(this.U, this.q, t, e, n);
+        })), new Bn(this.U, this.q, t, e, n);
     }
     /**
      * Resets the document changes and sets `hasPendingChanges` to false.
      */    J() {
-        this.K = !1, this.L = cs();
+        this.K = !1, this.L = Qn();
     }
     Y(t, e) {
         this.K = !0, this.L = this.L.insert(t, e);
@@ -7825,27 +7214,27 @@ class rs {
 /**
  * A helper class to accumulate watch changes into a RemoteEvent.
  */
-class us {
+class Gn {
     constructor(t) {
         this.nt = t, 
         /** The internal state of all tracked targets. */
         this.st = new Map, 
         /** Keeps track of the documents to update since the last raised snapshot. */
-        this.it = jn(), 
+        this.it = Dn(), 
         /** A mapping of document keys to their set of target IDs. */
-        this.rt = as(), 
+        this.rt = jn(), 
         /**
          * A list of targets with existence filter mismatches. These targets are
          * known to be inconsistent and their listens needs to be re-established by
          * RemoteStore.
          */
-        this.ot = new qn(rt);
+        this.ot = new bn(rt);
     }
     /**
      * Processes and adds the DocumentWatchChange to the current set of changes.
-     */    ut(t) {
-        for (const e of t.O) t.F && t.F.isFoundDocument() ? this.at(e, t.F) : this.ct(e, t.key, t.F);
-        for (const e of t.removedTargetIds) this.ct(e, t.key, t.F);
+     */    ct(t) {
+        for (const e of t.M) t.$ && t.$.isFoundDocument() ? this.ut(e, t.$) : this.at(e, t.key, t.$);
+        for (const e of t.removedTargetIds) this.at(e, t.key, t.$);
     }
     /** Processes and adds the WatchTargetChange to the current set of changes. */    ht(t) {
         this.forEachTarget(t, (e => {
@@ -7904,18 +7293,18 @@ class us {
      * Targets that are invalidated by filter mismatches are added to
      * `pendingTargetResets`.
      */    _t(t) {
-        const e = t.targetId, n = t.$.count, s = this.wt(e);
+        const e = t.targetId, n = t.F.count, s = this.wt(e);
         if (s) {
             const t = s.target;
-            if (ge(t)) if (0 === n) {
+            if (oe(t)) if (0 === n) {
                 // The existence filter told us the document does not exist. We deduce
                 // that this document does not exist and apply a deleted document to
                 // our updates. Without applying this deleted document there might be
                 // another query that will raise this document as part of a snapshot
                 // until it is resolved, essentially exposing inconsistency between
                 // queries.
-                const n = new xt(t.path);
-                this.ct(e, n, ne.newNoDocument(n, ct.min()));
+                const n = new Nt(t.path);
+                this.at(e, n, Jt.newNoDocument(n, at.min()));
             } else U(1 === n); else {
                 this.gt(e) !== n && (
                 // Existence filter mismatch: We reset the mapping and raise a new
@@ -7932,7 +7321,7 @@ class us {
         this.st.forEach(((n, s) => {
             const i = this.wt(s);
             if (i) {
-                if (n.current && ge(i.target)) {
+                if (n.current && oe(i.target)) {
                     // Document queries for document that don't exist can produce an empty
                     // result set. To update our local cache, we synthesize a document
                     // delete if we have not previously received the document. This
@@ -7941,13 +7330,13 @@ class us {
                     // TODO(dimond): Ideally we would have an explicit lookup target
                     // instead resulting in an explicit delete message and we could
                     // remove this special logic.
-                    const e = new xt(i.target.path);
-                    null !== this.it.get(e) || this.It(s, e) || this.ct(s, e, ne.newNoDocument(e, t));
+                    const e = new Nt(i.target.path);
+                    null !== this.it.get(e) || this.It(s, e) || this.at(s, e, Jt.newNoDocument(e, t));
                 }
                 n.j && (e.set(s, n.H()), n.J());
             }
         }));
-        let n = Xn();
+        let n = On();
         // We extract the set of limbo-only document updates as the GC logic
         // special-cases documents that do not appear in the target cache.
         
@@ -7960,18 +7349,18 @@ class us {
                 return !e || 2 /* LimboResolution */ === e.purpose || (s = !1, !1);
             })), s && (n = n.add(t));
         })), this.it.forEach(((e, n) => n.setReadTime(t)));
-        const s = new es(t, e, this.ot, this.it, n);
-        return this.it = jn(), this.rt = as(), this.ot = new qn(rt), s;
+        const s = new Fn(t, e, this.ot, this.it, n);
+        return this.it = Dn(), this.rt = jn(), this.ot = new bn(rt), s;
     }
     /**
      * Adds the provided document to the internal list of document updates and
      * its document key to the given target's mapping.
      */
     // Visible for testing.
-    at(t, e) {
+    ut(t, e) {
         if (!this.ft(t)) return;
         const n = this.It(t, e.key) ? 2 /* Modified */ : 0 /* Added */;
-        this.lt(t).Y(e.key, n), this.it = this.it.insert(e.key, e), this.rt = this.rt.insert(e.key, this.Tt(e.key).add(t));
+        this.lt(t).Y(e.key, n), this.it = this.it.insert(e.key, e), this.rt = this.rt.insert(e.key, this.Et(e.key).add(t));
     }
     /**
      * Removes the provided document from the target mapping. If the
@@ -7981,13 +7370,13 @@ class us {
      * to update the remote document cache.
      */
     // Visible for testing.
-    ct(t, e, n) {
+    at(t, e, n) {
         if (!this.ft(t)) return;
         const s = this.lt(t);
         this.It(t, e) ? s.Y(e, 1 /* Removed */) : 
         // The document may have entered and left the target before we raised a
         // snapshot, so we can just ignore the change.
-        s.X(e), this.rt = this.rt.insert(e, this.Tt(e).delete(t)), n && (this.it = this.it.insert(e, n));
+        s.X(e), this.rt = this.rt.insert(e, this.Et(e).delete(t)), n && (this.it = this.it.insert(e, n));
     }
     removeTarget(t) {
         this.st.delete(t);
@@ -8008,11 +7397,11 @@ class us {
     }
     lt(t) {
         let e = this.st.get(t);
-        return e || (e = new os, this.st.set(t, e)), e;
+        return e || (e = new Kn, this.st.set(t, e)), e;
     }
-    Tt(t) {
+    Et(t) {
         let e = this.rt.get(t);
-        return e || (e = new qn(rt), this.rt = this.rt.insert(t, e)), e;
+        return e || (e = new bn(rt), this.rt = this.rt.insert(t, e)), e;
     }
     /**
      * Verifies that the user is still interested in this target (by calling
@@ -8020,23 +7409,23 @@ class us {
      * from watch.
      */    ft(t) {
         const e = null !== this.wt(t);
-        return e || O("WatchChangeAggregator", "Detected inactive target", t), e;
+        return e || M("WatchChangeAggregator", "Detected inactive target", t), e;
     }
     /**
      * Returns the TargetData for an active target (i.e. a target that the user
      * is still interested in that has no outstanding target change requests).
      */    wt(t) {
         const e = this.st.get(t);
-        return e && e.G ? null : this.nt.Et(t);
+        return e && e.G ? null : this.nt.Tt(t);
     }
     /**
      * Resets the state of a Watch target to its initial state (e.g. sets
      * 'current' to false, clears the resume token and removes its target mapping
      * from all documents).
      */    dt(t) {
-        this.st.set(t, new os);
+        this.st.set(t, new Kn);
         this.nt.getRemoteKeysForTarget(t).forEach((e => {
-            this.ct(t, e, /*updatedDocument=*/ null);
+            this.at(t, e, /*updatedDocument=*/ null);
         }));
     }
     /**
@@ -8047,12 +7436,12 @@ class us {
     }
 }
 
-function as() {
-    return new Bn(xt.comparator);
+function jn() {
+    return new An(Nt.comparator);
 }
 
-function cs() {
-    return new Bn(xt.comparator);
+function Qn() {
+    return new An(Nt.comparator);
 }
 
 /**
@@ -8070,13 +7459,13 @@ function cs() {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const hs = (() => {
+ */ const Wn = (() => {
     const t = {
         asc: "ASCENDING",
         desc: "DESCENDING"
     };
     return t;
-})(), ls = (() => {
+})(), zn = (() => {
     const t = {
         "<": "LESS_THAN",
         "<=": "LESS_THAN_OR_EQUAL",
@@ -8106,7 +7495,7 @@ function cs() {
  * TODO(klimt): We can remove the databaseId argument if we keep the full
  * resource name in documents.
  */
-class fs {
+class Hn {
     constructor(t, e) {
         this.databaseId = t, this.N = e;
     }
@@ -8115,7 +7504,7 @@ class fs {
 /**
  * Returns a value for a Date that's appropriate to put into a proto.
  */
-function ds(t, e) {
+function Jn(t, e) {
     if (t.N) {
         return `${new Date(1e3 * e.seconds).toISOString().replace(/\.\d*/, "").replace("Z", "")}.${("000000000" + e.nanoseconds).slice(-9)}Z`;
     }
@@ -8130,99 +7519,99 @@ function ds(t, e) {
  *
  * Visible for testing.
  */
-function _s(t, e) {
+function Yn(t, e) {
     return t.N ? e.toBase64() : e.toUint8Array();
 }
 
 /**
  * Returns a ByteString based on the proto string value.
- */ function ws(t, e) {
-    return ds(t, e.toTimestamp());
+ */ function Xn(t, e) {
+    return Jn(t, e.toTimestamp());
 }
 
-function ms(t) {
-    return U(!!t), ct.fromTimestamp(function(t) {
-        const e = Tt(t);
-        return new at(e.seconds, e.nanos);
+function Zn(t) {
+    return U(!!t), at.fromTimestamp(function(t) {
+        const e = Et(t);
+        return new ut(e.seconds, e.nanos);
     }(t));
 }
 
-function gs(t, e) {
+function ts(t, e) {
     return function(t) {
         return new _t([ "projects", t.projectId, "databases", t.database ]);
     }(t).child("documents").child(e).canonicalString();
 }
 
-function ys(t) {
+function es(t) {
     const e = _t.fromString(t);
-    return U(Gs(e)), e;
+    return U(vs(e)), e;
 }
 
-function ps(t, e) {
-    return gs(t.databaseId, e.path);
+function ns(t, e) {
+    return ts(t.databaseId, e.path);
 }
 
-function Is(t, e) {
-    const n = ys(e);
-    if (n.get(1) !== t.databaseId.projectId) throw new Q(G.INVALID_ARGUMENT, "Tried to deserialize key from different project: " + n.get(1) + " vs " + t.databaseId.projectId);
-    if (n.get(3) !== t.databaseId.database) throw new Q(G.INVALID_ARGUMENT, "Tried to deserialize key from different database: " + n.get(3) + " vs " + t.databaseId.database);
-    return new xt(Rs(n));
+function ss(t, e) {
+    const n = es(e);
+    if (n.get(1) !== t.databaseId.projectId) throw new j(G.INVALID_ARGUMENT, "Tried to deserialize key from different project: " + n.get(1) + " vs " + t.databaseId.projectId);
+    if (n.get(3) !== t.databaseId.database) throw new j(G.INVALID_ARGUMENT, "Tried to deserialize key from different database: " + n.get(3) + " vs " + t.databaseId.database);
+    return new Nt(cs(n));
 }
 
-function Ts(t, e) {
-    return gs(t.databaseId, e);
+function is(t, e) {
+    return ts(t.databaseId, e);
 }
 
-function Es(t) {
-    const e = ys(t);
+function rs(t) {
+    const e = es(t);
     // In v1beta1 queries for collections at the root did not have a trailing
     // "/documents". In v1 all resource paths contain "/documents". Preserve the
     // ability to read the v1beta1 form for compatibility with queries persisted
     // in the local target cache.
-        return 4 === e.length ? _t.emptyPath() : Rs(e);
+        return 4 === e.length ? _t.emptyPath() : cs(e);
 }
 
-function As(t) {
+function os(t) {
     return new _t([ "projects", t.databaseId.projectId, "databases", t.databaseId.database ]).canonicalString();
 }
 
-function Rs(t) {
+function cs(t) {
     return U(t.length > 4 && "documents" === t.get(4)), t.popFirst(5);
 }
 
-/** Creates a Document proto from key and fields (but no create/update time) */ function Ps(t, e, n) {
+/** Creates a Document proto from key and fields (but no create/update time) */ function us(t, e, n) {
     return {
-        name: ps(t, e),
+        name: ns(t, e),
         fields: n.value.mapValue.fields
     };
 }
 
-function bs(t, e, n) {
-    const s = Is(t, e.name), i = ms(e.updateTime), r = new te({
+function as(t, e, n) {
+    const s = ss(t, e.name), i = Zn(e.updateTime), r = new zt({
         mapValue: {
             fields: e.fields
         }
-    }), o = ne.newFoundDocument(s, i, r);
+    }), o = Jt.newFoundDocument(s, i, r);
     return n && o.setHasCommittedMutations(), n ? o.setHasCommittedMutations() : o;
 }
 
-function Vs(t, e) {
+function hs(t, e) {
     return "found" in e ? function(t, e) {
         U(!!e.found), e.found.name, e.found.updateTime;
-        const n = Is(t, e.found.name), s = ms(e.found.updateTime), i = new te({
+        const n = ss(t, e.found.name), s = Zn(e.found.updateTime), i = new zt({
             mapValue: {
                 fields: e.found.fields
             }
         });
-        return ne.newFoundDocument(n, s, i);
+        return Jt.newFoundDocument(n, s, i);
     }(t, e) : "missing" in e ? function(t, e) {
         U(!!e.missing), U(!!e.readTime);
-        const n = Is(t, e.missing), s = ms(e.readTime);
-        return ne.newNoDocument(n, s);
+        const n = ss(t, e.missing), s = Zn(e.readTime);
+        return Jt.newNoDocument(n, s);
     }(t, e) : L();
 }
 
-function vs(t, e) {
+function ls(t, e) {
     let n;
     if ("targetChange" in e) {
         e.targetChange;
@@ -8233,9 +7622,9 @@ function vs(t, e) {
         }(e.targetChange.targetChangeType || "NO_CHANGE"), i = e.targetChange.targetIds || [], r = function(t, e) {
             return t.N ? (U(void 0 === e || "string" == typeof e), pt.fromBase64String(e || "")) : (U(void 0 === e || e instanceof Uint8Array), 
             pt.fromUint8Array(e || new Uint8Array));
-        }(t, e.targetChange.resumeToken), o = e.targetChange.cause, u = o && function(t) {
-            const e = void 0 === t.code ? G.UNKNOWN : Fn(t.code);
-            return new Q(e, t.message || "");
+        }(t, e.targetChange.resumeToken), o = e.targetChange.cause, c = o && function(t) {
+            const e = void 0 === t.code ? G.UNKNOWN : Tn(t.code);
+            return new j(e, t.message || "");
         }
         /**
  * Returns a value for a number (or null) that's appropriate to put into
@@ -8245,107 +7634,107 @@ function vs(t, e) {
  * our generated proto interfaces say Int32Value must be. But GRPC actually
  * expects a { value: <number> } struct.
  */ (o);
-        n = new rs(s, i, r, u || null);
+        n = new qn(s, i, r, c || null);
     } else if ("documentChange" in e) {
         e.documentChange;
         const s = e.documentChange;
         s.document, s.document.name, s.document.updateTime;
-        const i = Is(t, s.document.name), r = ms(s.document.updateTime), o = new te({
+        const i = ss(t, s.document.name), r = Zn(s.document.updateTime), o = new zt({
             mapValue: {
                 fields: s.document.fields
             }
-        }), u = ne.newFoundDocument(i, r, o), a = s.targetIds || [], c = s.removedTargetIds || [];
-        n = new ss(a, c, u.key, u);
+        }), c = Jt.newFoundDocument(i, r, o), u = s.targetIds || [], a = s.removedTargetIds || [];
+        n = new Ln(u, a, c.key, c);
     } else if ("documentDelete" in e) {
         e.documentDelete;
         const s = e.documentDelete;
         s.document;
-        const i = Is(t, s.document), r = s.readTime ? ms(s.readTime) : ct.min(), o = ne.newNoDocument(i, r), u = s.removedTargetIds || [];
-        n = new ss([], u, o.key, o);
+        const i = ss(t, s.document), r = s.readTime ? Zn(s.readTime) : at.min(), o = Jt.newNoDocument(i, r), c = s.removedTargetIds || [];
+        n = new Ln([], c, o.key, o);
     } else if ("documentRemove" in e) {
         e.documentRemove;
         const s = e.documentRemove;
         s.document;
-        const i = Is(t, s.document), r = s.removedTargetIds || [];
-        n = new ss([], r, i, null);
+        const i = ss(t, s.document), r = s.removedTargetIds || [];
+        n = new Ln([], r, i, null);
     } else {
         if (!("filter" in e)) return L();
         {
             e.filter;
             const t = e.filter;
             t.targetId;
-            const s = t.count || 0, i = new Nn(s), r = t.targetId;
-            n = new is(r, i);
+            const s = t.count || 0, i = new yn(s), r = t.targetId;
+            n = new Un(r, i);
         }
     }
     return n;
 }
 
-function Ss(t, e) {
+function fs(t, e) {
     let n;
-    if (e instanceof bn) n = {
-        update: Ps(t, e.key, e.value)
-    }; else if (e instanceof Cn) n = {
-        delete: ps(t, e.key)
-    }; else if (e instanceof Vn) n = {
-        update: Ps(t, e.key, e.data),
-        updateMask: Ks(e.fieldMask)
+    if (e instanceof ln) n = {
+        update: us(t, e.key, e.value)
+    }; else if (e instanceof mn) n = {
+        delete: ns(t, e.key)
+    }; else if (e instanceof fn) n = {
+        update: us(t, e.key, e.data),
+        updateMask: bs(e.fieldMask)
     }; else {
-        if (!(e instanceof xn)) return L();
+        if (!(e instanceof gn)) return L();
         n = {
-            verify: ps(t, e.key)
+            verify: ns(t, e.key)
         };
     }
     return e.fieldTransforms.length > 0 && (n.updateTransforms = e.fieldTransforms.map((t => function(t, e) {
         const n = e.transform;
-        if (n instanceof un) return {
+        if (n instanceof je) return {
             fieldPath: e.field.canonicalString(),
             setToServerValue: "REQUEST_TIME"
         };
-        if (n instanceof an) return {
+        if (n instanceof Qe) return {
             fieldPath: e.field.canonicalString(),
             appendMissingElements: {
                 values: n.elements
             }
         };
-        if (n instanceof hn) return {
+        if (n instanceof ze) return {
             fieldPath: e.field.canonicalString(),
             removeAllFromArray: {
                 values: n.elements
             }
         };
-        if (n instanceof fn) return {
+        if (n instanceof Je) return {
             fieldPath: e.field.canonicalString(),
             increment: n.k
         };
         throw L();
     }(0, t)))), e.precondition.isNone || (n.currentDocument = function(t, e) {
         return void 0 !== e.updateTime ? {
-            updateTime: ws(t, e.updateTime)
+            updateTime: Xn(t, e.updateTime)
         } : void 0 !== e.exists ? {
             exists: e.exists
         } : L();
     }(t, e.precondition)), n;
 }
 
-function Ds(t, e) {
+function ds(t, e) {
     const n = e.currentDocument ? function(t) {
-        return void 0 !== t.updateTime ? yn.updateTime(ms(t.updateTime)) : void 0 !== t.exists ? yn.exists(t.exists) : yn.none();
-    }(e.currentDocument) : yn.none(), s = e.updateTransforms ? e.updateTransforms.map((e => function(t, e) {
+        return void 0 !== t.updateTime ? nn.updateTime(Zn(t.updateTime)) : void 0 !== t.exists ? nn.exists(t.exists) : nn.none();
+    }(e.currentDocument) : nn.none(), s = e.updateTransforms ? e.updateTransforms.map((e => function(t, e) {
         let n = null;
-        if ("setToServerValue" in e) U("REQUEST_TIME" === e.setToServerValue), n = new un; else if ("appendMissingElements" in e) {
+        if ("setToServerValue" in e) U("REQUEST_TIME" === e.setToServerValue), n = new je; else if ("appendMissingElements" in e) {
             const t = e.appendMissingElements.values || [];
-            n = new an(t);
+            n = new Qe(t);
         } else if ("removeAllFromArray" in e) {
             const t = e.removeAllFromArray.values || [];
-            n = new hn(t);
-        } else "increment" in e ? n = new fn(t, e.increment) : L();
+            n = new ze(t);
+        } else "increment" in e ? n = new Je(t, e.increment) : L();
         const s = mt.fromServerFormat(e.fieldPath);
-        return new wn(s, n);
+        return new Ze(s, n);
     }(t, e))) : [];
     if (e.update) {
         e.update.name;
-        const i = Is(t, e.update.name), r = new te({
+        const i = ss(t, e.update.name), r = new zt({
             mapValue: {
                 fields: e.update.fields
             }
@@ -8355,50 +7744,50 @@ function Ds(t, e) {
                 const e = t.fieldPaths || [];
                 return new gt(e.map((t => mt.fromServerFormat(t))));
             }(e.updateMask);
-            return new Vn(i, r, t, n, s);
+            return new fn(i, r, t, n, s);
         }
-        return new bn(i, r, n, s);
+        return new ln(i, r, n, s);
     }
     if (e.delete) {
-        const s = Is(t, e.delete);
-        return new Cn(s, n);
+        const s = ss(t, e.delete);
+        return new mn(s, n);
     }
     if (e.verify) {
-        const s = Is(t, e.verify);
-        return new xn(s, n);
+        const s = ss(t, e.verify);
+        return new gn(s, n);
     }
     return L();
 }
 
-function Cs(t, e) {
+function _s(t, e) {
     return t && t.length > 0 ? (U(void 0 !== e), t.map((t => function(t, e) {
         // NOTE: Deletes don't have an updateTime.
-        let n = t.updateTime ? ms(t.updateTime) : ms(e);
-        return n.isEqual(ct.min()) && (
+        let n = t.updateTime ? Zn(t.updateTime) : Zn(e);
+        return n.isEqual(at.min()) && (
         // The Firestore Emulator currently returns an update time of 0 for
         // deletes of non-existing documents (rather than null). This breaks the
         // test "get deleted doc while offline with source=cache" as NoDocuments
         // with version 0 are filtered by IndexedDb's RemoteDocumentCache.
         // TODO(#2149): Remove this when Emulator is fixed
-        n = ms(e)), new gn(n, t.transformResults || []);
+        n = Zn(e)), new en(n, t.transformResults || []);
     }(t, e)))) : [];
 }
 
-function xs(t, e) {
+function ws(t, e) {
     return {
-        documents: [ Ts(t, e.path) ]
+        documents: [ is(t, e.path) ]
     };
 }
 
-function Ns(t, e) {
+function ms(t, e) {
     // Dissect the path into parent, collectionId, and optional key filter.
     const n = {
         structuredQuery: {}
     }, s = e.path;
-    null !== e.collectionGroup ? (n.parent = Ts(t, s), n.structuredQuery.from = [ {
+    null !== e.collectionGroup ? (n.parent = is(t, s), n.structuredQuery.from = [ {
         collectionId: e.collectionGroup,
         allDescendants: !0
-    } ]) : (n.parent = Ts(t, s.popLast()), n.structuredQuery.from = [ {
+    } ]) : (n.parent = is(t, s.popLast()), n.structuredQuery.from = [ {
         collectionId: s.lastSegment()
     } ]);
     const i = function(t) {
@@ -8409,34 +7798,34 @@ function Ns(t, e) {
             if ("==" /* EQUAL */ === t.op) {
                 if (jt(t.value)) return {
                     unaryFilter: {
-                        field: Bs(t.field),
+                        field: Ts(t.field),
                         op: "IS_NAN"
                     }
                 };
-                if (Qt(t.value)) return {
+                if (Gt(t.value)) return {
                     unaryFilter: {
-                        field: Bs(t.field),
+                        field: Ts(t.field),
                         op: "IS_NULL"
                     }
                 };
             } else if ("!=" /* NOT_EQUAL */ === t.op) {
                 if (jt(t.value)) return {
                     unaryFilter: {
-                        field: Bs(t.field),
+                        field: Ts(t.field),
                         op: "IS_NOT_NAN"
                     }
                 };
-                if (Qt(t.value)) return {
+                if (Gt(t.value)) return {
                     unaryFilter: {
-                        field: Bs(t.field),
+                        field: Ts(t.field),
                         op: "IS_NOT_NULL"
                     }
                 };
             }
             return {
                 fieldFilter: {
-                    field: Bs(t.field),
-                    op: $s(t.op),
+                    field: Ts(t.field),
+                    op: Es(t.op),
                     value: t.value
                 }
             };
@@ -8456,8 +7845,8 @@ function Ns(t, e) {
         // visible for testing
         function(t) {
             return {
-                field: Bs(t.field),
-                direction: Fs(t.dir)
+                field: Ts(t.field),
+                direction: Is(t.dir)
             };
         }(t)));
     }(e.orderBy);
@@ -8470,10 +7859,10 @@ function Ns(t, e) {
     /**
  * Returns a number (or null) from a google.protobuf.Int32Value proto.
  */ (t, e.limit);
-    var u;
+    var c;
     return null !== o && (n.structuredQuery.limit = o), e.startAt && (n.structuredQuery.startAt = {
-        before: (u = e.startAt).inclusive,
-        values: u.position
+        before: (c = e.startAt).inclusive,
+        values: c.position
     }), e.endAt && (n.structuredQuery.endAt = function(t) {
         return {
             before: !t.inclusive,
@@ -8482,8 +7871,8 @@ function Ns(t, e) {
     }(e.endAt)), n;
 }
 
-function ks(t) {
-    let e = Es(t.parent);
+function gs(t) {
+    let e = rs(t.parent);
     const n = t.structuredQuery, s = n.from ? n.from.length : 0;
     let i = null;
     if (s > 0) {
@@ -8492,10 +7881,10 @@ function ks(t) {
         t.allDescendants ? i = t.collectionId : e = e.child(t.collectionId);
     }
     let r = [];
-    n.where && (r = Os(n.where));
+    n.where && (r = ps(n.where));
     let o = [];
     n.orderBy && (o = n.orderBy.map((t => function(t) {
-        return new Ce(Ls(t.field), 
+        return new ge(As(t.field), 
         // visible for testing
         function(t) {
             switch (t) {
@@ -8512,26 +7901,26 @@ function ks(t) {
         // visible for testing
         (t.direction));
     }(t))));
-    let u = null;
-    n.limit && (u = function(t) {
+    let c = null;
+    n.limit && (c = function(t) {
         let e;
         return e = "object" == typeof t ? t.value : t, St(e) ? null : e;
     }(n.limit));
-    let a = null;
-    n.startAt && (a = function(t) {
+    let u = null;
+    n.startAt && (u = function(t) {
         const e = !!t.before, n = t.values || [];
-        return new De(n, e);
+        return new me(n, e);
     }(n.startAt));
-    let c = null;
-    return n.endAt && (c = function(t) {
+    let a = null;
+    return n.endAt && (a = function(t) {
         const e = !t.before, n = t.values || [];
-        return new De(n, e);
+        return new me(n, e);
     }
     // visible for testing
-    (n.endAt)), Oe(e, i, o, r, u, "F" /* First */ , a, c);
+    (n.endAt)), Te(e, i, o, r, c, "F" /* First */ , u, a);
 }
 
-function Ms(t, e) {
+function ys(t, e) {
     const n = function(t, e) {
         switch (e) {
           case 0 /* Listen */ :
@@ -8552,30 +7941,30 @@ function Ms(t, e) {
     };
 }
 
-function Os(t) {
-    return t ? void 0 !== t.unaryFilter ? [ qs(t) ] : void 0 !== t.fieldFilter ? [ Us(t) ] : void 0 !== t.compositeFilter ? t.compositeFilter.filters.map((t => Os(t))).reduce(((t, e) => t.concat(e))) : L() : [];
+function ps(t) {
+    return t ? void 0 !== t.unaryFilter ? [ Ps(t) ] : void 0 !== t.fieldFilter ? [ Rs(t) ] : void 0 !== t.compositeFilter ? t.compositeFilter.filters.map((t => ps(t))).reduce(((t, e) => t.concat(e))) : L() : [];
 }
 
-function Fs(t) {
-    return hs[t];
+function Is(t) {
+    return Wn[t];
 }
 
-function $s(t) {
-    return ls[t];
+function Es(t) {
+    return zn[t];
 }
 
-function Bs(t) {
+function Ts(t) {
     return {
         fieldPath: t.canonicalString()
     };
 }
 
-function Ls(t) {
+function As(t) {
     return mt.fromServerFormat(t.fieldPath);
 }
 
-function Us(t) {
-    return Te.create(Ls(t.fieldFilter.field), function(t) {
+function Rs(t) {
+    return ce.create(As(t.fieldFilter.field), function(t) {
         switch (t) {
           case "EQUAL":
             return "==" /* EQUAL */;
@@ -8613,29 +8002,29 @@ function Us(t) {
     }(t.fieldFilter.op), t.fieldFilter.value);
 }
 
-function qs(t) {
+function Ps(t) {
     switch (t.unaryFilter.op) {
       case "IS_NAN":
-        const e = Ls(t.unaryFilter.field);
-        return Te.create(e, "==" /* EQUAL */ , {
+        const e = As(t.unaryFilter.field);
+        return ce.create(e, "==" /* EQUAL */ , {
             doubleValue: NaN
         });
 
       case "IS_NULL":
-        const n = Ls(t.unaryFilter.field);
-        return Te.create(n, "==" /* EQUAL */ , {
+        const n = As(t.unaryFilter.field);
+        return ce.create(n, "==" /* EQUAL */ , {
             nullValue: "NULL_VALUE"
         });
 
       case "IS_NOT_NAN":
-        const s = Ls(t.unaryFilter.field);
-        return Te.create(s, "!=" /* NOT_EQUAL */ , {
+        const s = As(t.unaryFilter.field);
+        return ce.create(s, "!=" /* NOT_EQUAL */ , {
             doubleValue: NaN
         });
 
       case "IS_NOT_NULL":
-        const i = Ls(t.unaryFilter.field);
-        return Te.create(i, "!=" /* NOT_EQUAL */ , {
+        const i = As(t.unaryFilter.field);
+        return ce.create(i, "!=" /* NOT_EQUAL */ , {
             nullValue: "NULL_VALUE"
         });
 
@@ -8644,14 +8033,14 @@ function qs(t) {
     }
 }
 
-function Ks(t) {
+function bs(t) {
     const e = [];
     return t.fields.forEach((t => e.push(t.canonicalString()))), {
         fieldPaths: e
     };
 }
 
-function Gs(t) {
+function vs(t) {
     // Resource names have at least 4 components (project ID, database ID)
     return t.length >= 4 && "projects" === t.get(0) && "databases" === t.get(2);
 }
@@ -8675,13 +8064,13 @@ function Gs(t) {
 /**
  * Encodes a resource path into a IndexedDb-compatible string form.
  */
-function Qs(t) {
+function Vs(t) {
     let e = "";
-    for (let n = 0; n < t.length; n++) e.length > 0 && (e = Ws(e)), e = js(t.get(n), e);
-    return Ws(e);
+    for (let n = 0; n < t.length; n++) e.length > 0 && (e = Ds(e)), e = Ss(t.get(n), e);
+    return Ds(e);
 }
 
-/** Encodes a single segment of a resource path into the given result */ function js(t, e) {
+/** Encodes a single segment of a resource path into the given result */ function Ss(t, e) {
     let n = e;
     const s = t.length;
     for (let e = 0; e < s; e++) {
@@ -8702,7 +8091,7 @@ function Qs(t) {
     return n;
 }
 
-/** Encodes a path separator into the given result */ function Ws(t) {
+/** Encodes a path separator into the given result */ function Ds(t) {
     return t + "";
 }
 
@@ -8711,7 +8100,7 @@ function Qs(t) {
  * a ResourcePath instance. Note that this method is not suitable for use with
  * decoding resource names from the server; those are One Platform format
  * strings.
- */ function zs(t) {
+ */ function Cs(t) {
     // Event the empty path must encode as a path of at least length 2. A path
     // with exactly 2 must be the empty path.
     const e = t.length;
@@ -8754,24 +8143,7 @@ function Qs(t) {
 
 /**
  * @license
- * Copyright 2022 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */ const Hs = [ "userId", "batchId" ];
-
-/**
- * @license
- * Copyright 2022 Google LLC
+ * Copyright 2017 Google LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -8785,35 +8157,667 @@ function Qs(t) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+// TODO(indexing): Remove this constant
+/**
+ * Wrapper class to store timestamps (seconds and nanos) in IndexedDb objects.
+ */
+class Ns {
+    constructor(t, e) {
+        this.seconds = t, this.nanoseconds = e;
+    }
+}
+
+/**
+ * A singleton object to be stored in the 'owner' store in IndexedDb.
+ *
+ * A given database can have a single primary tab assigned at a given time. That
+ * tab must validate that it is still holding the primary lease before every
+ * operation that requires locked access. The primary tab should regularly
+ * write an updated timestamp to this lease to prevent other tabs from
+ * "stealing" the primary lease
+ */ class xs {
+    constructor(t, 
+    /** Whether to allow shared access from multiple tabs. */
+    e, n) {
+        this.ownerId = t, this.allowTabSynchronization = e, this.leaseTimestampMs = n;
+    }
+}
+
 /**
  * Name of the IndexedDb object store.
  *
  * Note that the name 'owner' is chosen to ensure backwards compatibility with
  * older clients that only supported single locked access to the persistence
  * layer.
- */
+ */ xs.store = "owner", 
 /**
- * Creates a [userId, encodedPath] key for use in the DbDocumentMutations
- * index to iterate over all at document mutations for a given path or lower.
+ * The key string used for the single object that exists in the
+ * DbPrimaryClient store.
  */
-function Js(t, e) {
-    return [ t, Qs(e) ];
-}
+xs.key = "owner";
 
 /**
- * Creates a full index key of [userId, encodedPath, batchId] for inserting
- * and deleting into the DbDocumentMutations index.
- */ function Ys(t, e, n) {
-    return [ t, Qs(e), n ];
+ * An object to be stored in the 'mutationQueues' store in IndexedDb.
+ *
+ * Each user gets a single queue of MutationBatches to apply to the server.
+ * DbMutationQueue tracks the metadata about the queue.
+ */
+class ks {
+    constructor(
+    /**
+     * The normalized user ID to which this queue belongs.
+     */
+    t, 
+    /**
+     * An identifier for the highest numbered batch that has been acknowledged
+     * by the server. All MutationBatches in this queue with batchIds less
+     * than or equal to this value are considered to have been acknowledged by
+     * the server.
+     *
+     * NOTE: this is deprecated and no longer used by the code.
+     */
+    e, 
+    /**
+     * A stream token that was previously sent by the server.
+     *
+     * See StreamingWriteRequest in datastore.proto for more details about
+     * usage.
+     *
+     * After sending this token, earlier tokens may not be used anymore so
+     * only a single stream token is retained.
+     *
+     * NOTE: this is deprecated and no longer used by the code.
+     */
+    n) {
+        this.userId = t, this.lastAcknowledgedBatchId = e, this.lastStreamToken = n;
+    }
 }
 
+/** Name of the IndexedDb object store.  */ ks.store = "mutationQueues", 
+/** Keys are automatically assigned via the userId property. */
+ks.keyPath = "userId";
+
+/**
+ * An object to be stored in the 'mutations' store in IndexedDb.
+ *
+ * Represents a batch of user-level mutations intended to be sent to the server
+ * in a single write. Each user-level batch gets a separate DbMutationBatch
+ * with a new batchId.
+ */
+class Os {
+    constructor(
+    /**
+     * The normalized user ID to which this batch belongs.
+     */
+    t, 
+    /**
+     * An identifier for this batch, allocated using an auto-generated key.
+     */
+    e, 
+    /**
+     * The local write time of the batch, stored as milliseconds since the
+     * epoch.
+     */
+    n, 
+    /**
+     * A list of "mutations" that represent a partial base state from when this
+     * write batch was initially created. During local application of the write
+     * batch, these baseMutations are applied prior to the real writes in order
+     * to override certain document fields from the remote document cache. This
+     * is necessary in the case of non-idempotent writes (e.g. `increment()`
+     * transforms) to make sure that the local view of the modified documents
+     * doesn't flicker if the remote document cache receives the result of the
+     * non-idempotent write before the write is removed from the queue.
+     *
+     * These mutations are never sent to the backend.
+     */
+    s, 
+    /**
+     * A list of mutations to apply. All mutations will be applied atomically.
+     *
+     * Mutations are serialized via toMutation().
+     */
+    i) {
+        this.userId = t, this.batchId = e, this.localWriteTimeMs = n, this.baseMutations = s, 
+        this.mutations = i;
+    }
+}
+
+/** Name of the IndexedDb object store.  */ Os.store = "mutations", 
+/** Keys are automatically assigned via the userId, batchId properties. */
+Os.keyPath = "batchId", 
+/** The index name for lookup of mutations by user. */
+Os.userMutationsIndex = "userMutationsIndex", 
+/** The user mutations index is keyed by [userId, batchId] pairs. */
+Os.userMutationsKeyPath = [ "userId", "batchId" ];
+
+/**
+ * An object to be stored in the 'documentMutations' store in IndexedDb.
+ *
+ * A manually maintained index of all the mutation batches that affect a given
+ * document key. The rows in this table are references based on the contents of
+ * DbMutationBatch.mutations.
+ */
+class Ms {
+    constructor() {}
+    /**
+     * Creates a [userId] key for use in the DbDocumentMutations index to iterate
+     * over all of a user's document mutations.
+     */    static prefixForUser(t) {
+        return [ t ];
+    }
+    /**
+     * Creates a [userId, encodedPath] key for use in the DbDocumentMutations
+     * index to iterate over all at document mutations for a given path or lower.
+     */    static prefixForPath(t, e) {
+        return [ t, Vs(e) ];
+    }
+    /**
+     * Creates a full index key of [userId, encodedPath, batchId] for inserting
+     * and deleting into the DbDocumentMutations index.
+     */    static key(t, e, n) {
+        return [ t, Vs(e), n ];
+    }
+}
+
+Ms.store = "documentMutations", 
 /**
  * Because we store all the useful information for this store in the key,
  * there is no useful information to store as the value. The raw (unencoded)
  * path cannot be stored because IndexedDb doesn't store prototype
  * information.
- */ const Xs = {}, Zs = [ "prefixPath", "collectionGroup", "readTime", "documentId" ], ti = [ "prefixPath", "collectionGroup", "documentId" ], ei = [ "collectionGroup", "readTime", "prefixPath", "documentId" ], ni = [ "canonicalId", "targetId" ], si = [ "targetId", "path" ], ii = [ "path", "targetId" ], ri = [ "collectionId", "parent" ], oi = [ "indexId", "uid" ], ui = [ "uid", "sequenceNumber" ], ai = [ "indexId", "uid", "arrayValue", "directionalValue", "orderedDocumentKey", "documentKey" ], ci = [ "indexId", "uid", "orderedDocumentKey" ], hi = [ "userId", "collectionPath", "documentId" ], li = [ "userId", "collectionPath", "largestBatchId" ], fi = [ "userId", "collectionGroup", "largestBatchId" ], di = [ ...[ ...[ ...[ ...[ "mutationQueues", "mutations", "documentMutations", "remoteDocuments", "targets", "owner", "targetGlobal", "targetDocuments" ], "clientMetadata" ], "remoteDocumentGlobal" ], "collectionParents" ], "bundles", "namedQueries" ], _i = [ ...di, "documentOverlays" ], wi = [ "mutationQueues", "mutations", "documentMutations", "remoteDocumentsV14", "targets", "owner", "targetGlobal", "targetDocuments", "clientMetadata", "remoteDocumentGlobal", "collectionParents", "bundles", "namedQueries", "documentOverlays" ], mi = [ ...wi, "indexConfiguration", "indexState", "indexEntries" ];
+ */
+Ms.PLACEHOLDER = new Ms;
 
+/**
+ * Represents the known absence of a document at a particular version.
+ * Stored in IndexedDb as part of a DbRemoteDocument object.
+ */
+class $s {
+    constructor(t, e) {
+        this.path = t, this.readTime = e;
+    }
+}
+
+/**
+ * Represents a document that is known to exist but whose data is unknown.
+ * Stored in IndexedDb as part of a DbRemoteDocument object.
+ */ class Fs {
+    constructor(t, e) {
+        this.path = t, this.version = e;
+    }
+}
+
+/**
+ * An object to be stored in the 'remoteDocuments' store in IndexedDb.
+ * It represents either:
+ *
+ * - A complete document.
+ * - A "no document" representing a document that is known not to exist (at
+ * some version).
+ * - An "unknown document" representing a document that is known to exist (at
+ * some version) but whose contents are unknown.
+ *
+ * Note: This is the persisted equivalent of a MaybeDocument and could perhaps
+ * be made more general if necessary.
+ */ class Bs {
+    // TODO: We are currently storing full document keys almost three times
+    // (once as part of the primary key, once - partly - as `parentPath` and once
+    // inside the encoded documents). During our next migration, we should
+    // rewrite the primary key as parentPath + document ID which would allow us
+    // to drop one value.
+    constructor(
+    /**
+     * Set to an instance of DbUnknownDocument if the data for a document is
+     * not known, but it is known that a document exists at the specified
+     * version (e.g. it had a successful update applied to it)
+     */
+    t, 
+    /**
+     * Set to an instance of a DbNoDocument if it is known that no document
+     * exists.
+     */
+    e, 
+    /**
+     * Set to an instance of a Document if there's a cached version of the
+     * document.
+     */
+    n, 
+    /**
+     * Documents that were written to the remote document store based on
+     * a write acknowledgment are marked with `hasCommittedMutations`. These
+     * documents are potentially inconsistent with the backend's copy and use
+     * the write's commit version as their document version.
+     */
+    s, 
+    /**
+     * When the document was read from the backend. Undefined for data written
+     * prior to schema version 9.
+     */
+    i, 
+    /**
+     * The path of the collection this document is part of. Undefined for data
+     * written prior to schema version 9.
+     */
+    r) {
+        this.unknownDocument = t, this.noDocument = e, this.document = n, this.hasCommittedMutations = s, 
+        this.readTime = i, this.parentPath = r;
+    }
+}
+
+Bs.store = "remoteDocuments", 
+/**
+ * An index that provides access to all entries sorted by read time (which
+ * corresponds to the last modification time of each row).
+ *
+ * This index is used to provide a changelog for Multi-Tab.
+ */
+Bs.readTimeIndex = "readTimeIndex", Bs.readTimeIndexPath = "readTime", 
+/**
+ * An index that provides access to documents in a collection sorted by read
+ * time.
+ *
+ * This index is used to allow the RemoteDocumentCache to fetch newly changed
+ * documents in a collection.
+ */
+Bs.collectionReadTimeIndex = "collectionReadTimeIndex", Bs.collectionReadTimeIndexPath = [ "parentPath", "readTime" ];
+
+/**
+ * Contains a single entry that has metadata about the remote document cache.
+ */
+class Ls {
+    /**
+     * @param byteSize - Approximately the total size in bytes of all the
+     * documents in the document cache.
+     */
+    constructor(t) {
+        this.byteSize = t;
+    }
+}
+
+Ls.store = "remoteDocumentGlobal", Ls.key = "remoteDocumentGlobalKey";
+
+/**
+ * An object to be stored in the 'targets' store in IndexedDb.
+ *
+ * This is based on and should be kept in sync with the proto used in the iOS
+ * client.
+ *
+ * Each query the client listens to against the server is tracked on disk so
+ * that the query can be efficiently resumed on restart.
+ */
+class Us {
+    constructor(
+    /**
+     * An auto-generated sequential numeric identifier for the query.
+     *
+     * Queries are stored using their canonicalId as the key, but these
+     * canonicalIds can be quite long so we additionally assign a unique
+     * queryId which can be used by referenced data structures (e.g.
+     * indexes) to minimize the on-disk cost.
+     */
+    t, 
+    /**
+     * The canonical string representing this query. This is not unique.
+     */
+    e, 
+    /**
+     * The last readTime received from the Watch Service for this query.
+     *
+     * This is the same value as TargetChange.read_time in the protos.
+     */
+    n, 
+    /**
+     * An opaque, server-assigned token that allows watching a query to be
+     * resumed after disconnecting without retransmitting all the data
+     * that matches the query. The resume token essentially identifies a
+     * point in time from which the server should resume sending results.
+     *
+     * This is related to the snapshotVersion in that the resumeToken
+     * effectively also encodes that value, but the resumeToken is opaque
+     * and sometimes encodes additional information.
+     *
+     * A consequence of this is that the resumeToken should be used when
+     * asking the server to reason about where this client is in the watch
+     * stream, but the client should use the snapshotVersion for its own
+     * purposes.
+     *
+     * This is the same value as TargetChange.resume_token in the protos.
+     */
+    s, 
+    /**
+     * A sequence number representing the last time this query was
+     * listened to, used for garbage collection purposes.
+     *
+     * Conventionally this would be a timestamp value, but device-local
+     * clocks are unreliable and they must be able to create new listens
+     * even while disconnected. Instead this should be a monotonically
+     * increasing number that's incremented on each listen call.
+     *
+     * This is different from the queryId since the queryId is an
+     * immutable identifier assigned to the Query on first use while
+     * lastListenSequenceNumber is updated every time the query is
+     * listened to.
+     */
+    i, 
+    /**
+     * Denotes the maximum snapshot version at which the associated query view
+     * contained no limbo documents.  Undefined for data written prior to
+     * schema version 9.
+     */
+    r, 
+    /**
+     * The query for this target.
+     *
+     * Because canonical ids are not unique we must store the actual query. We
+     * use the proto to have an object we can persist without having to
+     * duplicate translation logic to and from a `Query` object.
+     */
+    o) {
+        this.targetId = t, this.canonicalId = e, this.readTime = n, this.resumeToken = s, 
+        this.lastListenSequenceNumber = i, this.lastLimboFreeSnapshotVersion = r, this.query = o;
+    }
+}
+
+Us.store = "targets", 
+/** Keys are automatically assigned via the targetId property. */
+Us.keyPath = "targetId", 
+/** The name of the queryTargets index. */
+Us.queryTargetsIndexName = "queryTargetsIndex", 
+/**
+ * The index of all canonicalIds to the targets that they match. This is not
+ * a unique mapping because canonicalId does not promise a unique name for all
+ * possible queries, so we append the targetId to make the mapping unique.
+ */
+Us.queryTargetsKeyPath = [ "canonicalId", "targetId" ];
+
+/**
+ * An object representing an association between a target and a document, or a
+ * sentinel row marking the last sequence number at which a document was used.
+ * Each document cached must have a corresponding sentinel row before lru
+ * garbage collection is enabled.
+ *
+ * The target associations and sentinel rows are co-located so that orphaned
+ * documents and their sequence numbers can be identified efficiently via a scan
+ * of this store.
+ */
+class qs {
+    constructor(
+    /**
+     * The targetId identifying a target or 0 for a sentinel row.
+     */
+    t, 
+    /**
+     * The path to the document, as encoded in the key.
+     */
+    e, 
+    /**
+     * If this is a sentinel row, this should be the sequence number of the last
+     * time the document specified by `path` was used. Otherwise, it should be
+     * `undefined`.
+     */
+    n) {
+        this.targetId = t, this.path = e, this.sequenceNumber = n;
+    }
+}
+
+/** Name of the IndexedDb object store.  */ qs.store = "targetDocuments", 
+/** Keys are automatically assigned via the targetId, path properties. */
+qs.keyPath = [ "targetId", "path" ], 
+/** The index name for the reverse index. */
+qs.documentTargetsIndex = "documentTargetsIndex", 
+/** We also need to create the reverse index for these properties. */
+qs.documentTargetsKeyPath = [ "path", "targetId" ];
+
+/**
+ * A record of global state tracked across all Targets, tracked separately
+ * to avoid the need for extra indexes.
+ *
+ * This should be kept in-sync with the proto used in the iOS client.
+ */
+class Ks {
+    constructor(
+    /**
+     * The highest numbered target id across all targets.
+     *
+     * See DbTarget.targetId.
+     */
+    t, 
+    /**
+     * The highest numbered lastListenSequenceNumber across all targets.
+     *
+     * See DbTarget.lastListenSequenceNumber.
+     */
+    e, 
+    /**
+     * A global snapshot version representing the last consistent snapshot we
+     * received from the backend. This is monotonically increasing and any
+     * snapshots received from the backend prior to this version (e.g. for
+     * targets resumed with a resumeToken) should be suppressed (buffered)
+     * until the backend has caught up to this snapshot version again. This
+     * prevents our cache from ever going backwards in time.
+     */
+    n, 
+    /**
+     * The number of targets persisted.
+     */
+    s) {
+        this.highestTargetId = t, this.highestListenSequenceNumber = e, this.lastRemoteSnapshotVersion = n, 
+        this.targetCount = s;
+    }
+}
+
+/**
+ * The key string used for the single object that exists in the
+ * DbTargetGlobal store.
+ */ Ks.key = "targetGlobalKey", Ks.store = "targetGlobal";
+
+/**
+ * An object representing an association between a Collection id (e.g. 'messages')
+ * to a parent path (e.g. '/chats/123') that contains it as a (sub)collection.
+ * This is used to efficiently find all collections to query when performing
+ * a Collection Group query.
+ */
+class Gs {
+    constructor(
+    /**
+     * The collectionId (e.g. 'messages')
+     */
+    t, 
+    /**
+     * The path to the parent (either a document location or an empty path for
+     * a root-level collection).
+     */
+    e) {
+        this.collectionId = t, this.parent = e;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Gs.store = "collectionParents", 
+/** Keys are automatically assigned via the collectionId, parent properties. */
+Gs.keyPath = [ "collectionId", "parent" ];
+
+/**
+ * A record of the metadata state of each client.
+ *
+ * PORTING NOTE: This is used to synchronize multi-tab state and does not need
+ * to be ported to iOS or Android.
+ */
+class js {
+    constructor(
+    // Note: Previous schema versions included a field
+    // "lastProcessedDocumentChangeId". Don't use anymore.
+    /** The auto-generated client id assigned at client startup. */
+    t, 
+    /** The last time this state was updated. */
+    e, 
+    /** Whether the client's network connection is enabled. */
+    n, 
+    /** Whether this client is running in a foreground tab. */
+    s) {
+        this.clientId = t, this.updateTimeMs = e, this.networkEnabled = n, this.inForeground = s;
+    }
+}
+
+/** Name of the IndexedDb object store. */ js.store = "clientMetadata", 
+/** Keys are automatically assigned via the clientId properties. */
+js.keyPath = "clientId";
+
+/** An object representing a bundle loaded by the SDK. */
+class Qs {
+    constructor(
+    /** The ID of the loaded bundle. */
+    t, 
+    /** The create time of the loaded bundle. */
+    e, 
+    /** The schema version of the loaded bundle. */
+    n) {
+        this.bundleId = t, this.createTime = e, this.version = n;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Qs.store = "bundles", Qs.keyPath = "bundleId";
+
+/** An object representing a named query loaded by the SDK via a bundle. */
+class Ws {
+    constructor(
+    /** The name of the query. */
+    t, 
+    /** The read time of the results saved in the bundle from the named query. */
+    e, 
+    /** The query saved in the bundle. */
+    n) {
+        this.name = t, this.readTime = e, this.bundledQuery = n;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Ws.store = "namedQueries", Ws.keyPath = "name";
+
+/** An object representing the global configuration for a field index. */
+class zs {
+    constructor(
+    /**
+     * The index id for this entry. Undefined for indexes that are not yet
+     * persisted.
+     */
+    t, 
+    /** The collection group this index belongs to. */
+    e, 
+    /** The fields to index for this index. */
+    n) {
+        this.indexId = t, this.collectionGroup = e, this.fields = n;
+    }
+}
+
+/** Name of the IndexedDb object store. */ zs.store = "indexConfiguration", zs.keyPath = "indexId", 
+/**
+ * An index that provides access to the index configurations by collection
+ * group.
+ *
+ * PORTING NOTE: iOS and Android maintain this index in-memory, but this is
+ * not possible here as the Web client supports concurrent access to
+ * persistence via multi-tab.
+ */
+zs.collectionGroupIndex = "collectionGroupIndex", zs.collectionGroupIndexPath = "collectionGroup";
+
+/**
+ * An object describing how up-to-date the index backfill is for each user and
+ * index.
+ */
+class Hs {
+    constructor(
+    /** The index id for this entry. */
+    t, 
+    /** The user id for this entry. */
+    e, 
+    /**
+     * A number that indicates when the index was last updated (relative to
+     * other indexes).
+     */
+    n, 
+    /**
+     * The latest read time that has been indexed by Firestore for this field
+     * index. Set to `{seconds: 0, nanos: 0}` if no documents have been indexed.
+     */
+    s, 
+    /**
+     * The last document that has been indexed for this field index. Empty if
+     * no documents have been indexed.
+     */
+    i, 
+    /**
+     * The largest mutation batch id that has been processed for this index. -1
+     * if no mutations have been indexed.
+     */
+    r) {
+        this.indexId = t, this.uid = e, this.sequenceNumber = n, this.readTime = s, this.documentKey = i, 
+        this.largestBatchId = r;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Hs.store = "indexState", Hs.keyPath = [ "indexId", "uid" ], 
+/**
+ * An index that provides access to documents in a collection sorted by last
+ * update time. Used by the backfiller.
+ *
+ * PORTING NOTE: iOS and Android maintain this index in-memory, but this is
+ * not possible here as the Web client supports concurrent access to
+ * persistence via multi-tab.
+ */
+Hs.sequenceNumberIndex = "sequenceNumberIndex", Hs.sequenceNumberIndexPath = [ "uid", "sequenceNumber" ];
+
+/** An object that stores the encoded entries for all documents and fields. */
+class Js {
+    constructor(
+    /** The index id for this entry. */
+    t, 
+    /** The user id for this entry. */
+    e, 
+    /** The encoded array index value for this entry. */
+    n, 
+    /** The encoded directional value for equality and inequality filters. */
+    s, 
+    /** The document key this entry points to. */
+    i) {
+        this.indexId = t, this.uid = e, this.arrayValue = n, this.directionalValue = s, 
+        this.documentKey = i;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Js.store = "indexEntries", Js.keyPath = [ "indexId", "uid", "arrayValue", "directionalValue", "documentKey" ], 
+Js.documentKeyIndex = "documentKeyIndex", Js.documentKeyIndexPath = [ "indexId", "uid", "documentKey" ];
+
+/**
+ * An object representing a document overlay.
+ */
+class Ys {
+    constructor(
+    /** The user ID to whom this overlay belongs. */
+    t, 
+    /** The path to the collection that contains the document. */
+    e, 
+    /** The ID (key) of the document within the collection. */
+    n, 
+    /** The collection group to which the document belongs. */
+    s, 
+    /** The largest batch ID that's been applied for this overlay. */
+    i, 
+    /** The overlay mutation. */
+    r) {
+        this.userId = t, this.collectionPath = e, this.documentId = n, this.collectionGroup = s, 
+        this.largestBatchId = i, this.overlayMutation = r;
+    }
+}
+
+/** Name of the IndexedDb object store. */ Ys.store = "documentOverlays", Ys.keyPath = [ "userId", "collectionPath", "documentId" ], 
+Ys.collectionPathOverlayIndex = "collectionPathOverlayIndex", Ys.collectionPathOverlayIndexPath = [ "userId", "collectionPath", "largestBatchId" ], 
+Ys.collectionGroupOverlayIndex = "collectionGroupOverlayIndex", Ys.collectionGroupOverlayIndexPath = [ "userId", "collectionGroup", "largestBatchId" ];
+
+// Visible for testing
+const Xs = [ ...[ ...[ ...[ ...[ ks.store, Os.store, Ms.store, Bs.store, Us.store, xs.store, Ks.store, qs.store ], js.store ], Ls.store ], Gs.store ], Qs.store, Ws.store ], Zs = [ ...Xs, Ys.store ], ti = [ ...Zs, zs.store, Hs.store, Js.store ];
+
+// V2 is no longer usable (see comment at top of file)
+// Visible for testing
 /**
  * @license
  * Copyright 2020 Google LLC
@@ -8830,7 +8834,7 @@ function Js(t, e) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-const gi = "The current tab is not in the required state to perform this operation. It might be necessary to refresh the browser tab.";
+const ei = "The current tab is not in the required state to perform this operation. It might be necessary to refresh the browser tab.";
 
 /**
  * A base class representing a persistence transaction, encapsulating both the
@@ -8839,7 +8843,7 @@ const gi = "The current tab is not in the required state to perform this operati
  * When you call Persistence.runTransaction(), it will create a transaction and
  * pass it to your callback. You then pass it to any method that operates
  * on persistence.
- */ class yi {
+ */ class ni {
     constructor() {
         this.onCommittedListeners = [];
     }
@@ -8879,7 +8883,7 @@ const gi = "The current tab is not in the required state to perform this operati
  *
  * NOTE: .then() and .catch() only allow a single consumer, unlike normal
  * Promises.
- */ class pi {
+ */ class si {
     constructor(t) {
         // NOTE: next/catchCallback will always point to our own wrapper functions,
         // not the user's raw next() or catch() callbacks.
@@ -8901,7 +8905,7 @@ const gi = "The current tab is not in the required state to perform this operati
         return this.next(void 0, t);
     }
     next(t, e) {
-        return this.callbackAttached && L(), this.callbackAttached = !0, this.isDone ? this.error ? this.wrapFailure(e, this.error) : this.wrapSuccess(t, this.result) : new pi(((n, s) => {
+        return this.callbackAttached && L(), this.callbackAttached = !0, this.isDone ? this.error ? this.wrapFailure(e, this.error) : this.wrapSuccess(t, this.result) : new si(((n, s) => {
             this.nextCallback = e => {
                 this.wrapSuccess(t, e).next(n, s);
             }, this.catchCallback = t => {
@@ -8917,24 +8921,24 @@ const gi = "The current tab is not in the required state to perform this operati
     wrapUserFunction(t) {
         try {
             const e = t();
-            return e instanceof pi ? e : pi.resolve(e);
+            return e instanceof si ? e : si.resolve(e);
         } catch (t) {
-            return pi.reject(t);
+            return si.reject(t);
         }
     }
     wrapSuccess(t, e) {
-        return t ? this.wrapUserFunction((() => t(e))) : pi.resolve(e);
+        return t ? this.wrapUserFunction((() => t(e))) : si.resolve(e);
     }
     wrapFailure(t, e) {
-        return t ? this.wrapUserFunction((() => t(e))) : pi.reject(e);
+        return t ? this.wrapUserFunction((() => t(e))) : si.reject(e);
     }
     static resolve(t) {
-        return new pi(((e, n) => {
+        return new si(((e, n) => {
             e(t);
         }));
     }
     static reject(t) {
-        return new pi(((e, n) => {
+        return new si(((e, n) => {
             n(t);
         }));
     }
@@ -8942,7 +8946,7 @@ const gi = "The current tab is not in the required state to perform this operati
     // Accept all Promise types in waitFor().
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     t) {
-        return new pi(((e, n) => {
+        return new si(((e, n) => {
             let s = 0, i = 0, r = !1;
             t.forEach((t => {
                 ++s, t.next((() => {
@@ -8957,8 +8961,8 @@ const gi = "The current tab is not in the required state to perform this operati
      * will be evaluated until one of them returns `true`, then stop. The final
      * result will be whether any of them returned `true`.
      */    static or(t) {
-        let e = pi.resolve(!1);
-        for (const n of t) e = e.next((t => t ? pi.resolve(t) : n()));
+        let e = si.resolve(!1);
+        for (const n of t) e = e.next((t => t ? si.resolve(t) : n()));
         return e;
     }
     static forEach(t, e) {
@@ -8991,33 +8995,33 @@ const gi = "The current tab is not in the required state to perform this operati
  * Wraps an IDBTransaction and exposes a store() method to get a handle to a
  * specific object store.
  */
-class Ii {
+class ii {
     constructor(t, e) {
         this.action = t, this.transaction = e, this.aborted = !1, 
         /**
          * A `Promise` that resolves with the result of the IndexedDb transaction.
          */
-        this.At = new j, this.transaction.oncomplete = () => {
+        this.At = new Q, this.transaction.oncomplete = () => {
             this.At.resolve();
         }, this.transaction.onabort = () => {
-            e.error ? this.At.reject(new Ai(t, e.error)) : this.At.resolve();
+            e.error ? this.At.reject(new ci(t, e.error)) : this.At.resolve();
         }, this.transaction.onerror = e => {
-            const n = vi(e.target.error);
-            this.At.reject(new Ai(t, n));
+            const n = fi(e.target.error);
+            this.At.reject(new ci(t, n));
         };
     }
     static open(t, e, n, s) {
         try {
-            return new Ii(e, t.transaction(s, n));
+            return new ii(e, t.transaction(s, n));
         } catch (t) {
-            throw new Ai(e, t);
+            throw new ci(e, t);
         }
     }
     get Rt() {
         return this.At.promise;
     }
     abort(t) {
-        t && this.At.reject(t), this.aborted || (O("SimpleDb", "Aborting transaction:", t ? t.message : "Client-initiated abort"), 
+        t && this.At.reject(t), this.aborted || (M("SimpleDb", "Aborting transaction:", t ? t.message : "Client-initiated abort"), 
         this.aborted = !0, this.transaction.abort());
     }
     Pt() {
@@ -9037,7 +9041,7 @@ class Ii {
      * correct, but they allow type safety through the rest of the consuming code.
      */    store(t) {
         const e = this.transaction.objectStore(t);
-        return new Pi(e);
+        return new ai(e);
     }
 }
 
@@ -9047,7 +9051,7 @@ class Ii {
  * since .then() continuations are executed asynchronously (e.g. via
  * .setImmediate), which would cause IndexedDB to end the transaction.
  * See PersistencePromise for more details.
- */ class Ti {
+ */ class ri {
     /*
      * Creates a new SimpleDb wrapper for IndexedDb database `name`.
      *
@@ -9063,14 +9067,14 @@ class Ii {
         // bug we're checking for should exist in iOS >= 12.2 and < 13, but for
         // whatever reason it's much harder to hit after 12.2 so we only proactively
         // log on 12.2.
-        12.2 === Ti.Vt(Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])()) && F("Firestore persistence suffers from a bug in iOS 12.2 Safari that may cause your app to stop working. See https://stackoverflow.com/q/56496296/110915 for details and a potential workaround.");
+        12.2 === ri.vt(Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])()) && $("Firestore persistence suffers from a bug in iOS 12.2 Safari that may cause your app to stop working. See https://stackoverflow.com/q/56496296/110915 for details and a potential workaround.");
     }
     /** Deletes the specified database. */    static delete(t) {
-        return O("SimpleDb", "Removing database:", t), bi(window.indexedDB.deleteDatabase(t)).toPromise();
+        return M("SimpleDb", "Removing database:", t), hi(window.indexedDB.deleteDatabase(t)).toPromise();
     }
-    /** Returns true if IndexedDB is available in the current environment. */    static vt() {
+    /** Returns true if IndexedDB is available in the current environment. */    static Vt() {
         if (!Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isIndexedDBAvailable"])()) return !1;
-        if (Ti.St()) return !0;
+        if (ri.St()) return !0;
         // We extensively use indexed array values and compound keys,
         // which IE and Edge do not support. However, they still have indexedDB
         // defined on the window, so we need to check for them here and make sure
@@ -9078,7 +9082,7 @@ class Ii {
         // For tracking support of this feature, see here:
         // https://developer.microsoft.com/en-us/microsoft-edge/platform/status/indexeddbarraysandmultientrysupport/
         // Check the UA string to find out the browser.
-                const t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])(), e = Ti.Vt(t), n = 0 < e && e < 10, s = Ti.Dt(t), i = 0 < s && s < 4.5;
+                const t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])(), e = ri.vt(t), n = 0 < e && e < 10, s = ri.Dt(t), i = 0 < s && s < 4.5;
         // IE 10
         // ua = 'Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.2; Trident/6.0)';
         // IE 11
@@ -9096,12 +9100,12 @@ class Ii {
         var t;
         return "undefined" != typeof process && "YES" === (null === (t = process.env) || void 0 === t ? void 0 : t.Ct);
     }
-    /** Helper to get a typed SimpleDbStore from a transaction. */    static xt(t, e) {
+    /** Helper to get a typed SimpleDbStore from a transaction. */    static Nt(t, e) {
         return t.store(e);
     }
     // visible for testing
     /** Parse User Agent to determine iOS version. Returns -1 if not found. */
-    static Vt(t) {
+    static vt(t) {
         const e = t.match(/i(?:phone|pad|pod) os ([\d_]+)/i), n = e ? e[1].split("_").slice(0, 2).join(".") : "-1";
         return Number(n);
     }
@@ -9113,8 +9117,8 @@ class Ii {
     }
     /**
      * Opens the specified database, creating or upgrading it if necessary.
-     */    async Nt(t) {
-        return this.db || (O("SimpleDb", "Opening database:", this.name), this.db = await new Promise(((e, n) => {
+     */    async xt(t) {
+        return this.db || (M("SimpleDb", "Opening database:", this.name), this.db = await new Promise(((e, n) => {
             // TODO(mikelehen): Investigate browser compatibility.
             // https://developer.mozilla.org/en-US/docs/Web/API/IndexedDB_API/Using_IndexedDB
             // suggests IE9 and older WebKit browsers handle upgrade
@@ -9125,21 +9129,21 @@ class Ii {
                 const n = t.target.result;
                 e(n);
             }, s.onblocked = () => {
-                n(new Ai(t, "Cannot upgrade IndexedDB schema while another tab is open. Close all tabs that access Firestore and reload this page to proceed."));
+                n(new ci(t, "Cannot upgrade IndexedDB schema while another tab is open. Close all tabs that access Firestore and reload this page to proceed."));
             }, s.onerror = e => {
                 const s = e.target.error;
-                "VersionError" === s.name ? n(new Q(G.FAILED_PRECONDITION, "A newer version of the Firestore SDK was previously used and so the persisted data is not compatible with the version of the SDK you are now using. The SDK will operate with persistence disabled. If you need persistence, please re-upgrade to a newer version of the SDK or else clear the persisted IndexedDB data for your app to start fresh.")) : "InvalidStateError" === s.name ? n(new Q(G.FAILED_PRECONDITION, "Unable to open an IndexedDB connection. This could be due to running in a private browsing session on a browser whose private browsing sessions do not support IndexedDB: " + s)) : n(new Ai(t, s));
+                "VersionError" === s.name ? n(new j(G.FAILED_PRECONDITION, "A newer version of the Firestore SDK was previously used and so the persisted data is not compatible with the version of the SDK you are now using. The SDK will operate with persistence disabled. If you need persistence, please re-upgrade to a newer version of the SDK or else clear the persisted IndexedDB data for your app to start fresh.")) : "InvalidStateError" === s.name ? n(new j(G.FAILED_PRECONDITION, "Unable to open an IndexedDB connection. This could be due to running in a private browsing session on a browser whose private browsing sessions do not support IndexedDB: " + s)) : n(new ci(t, s));
             }, s.onupgradeneeded = t => {
-                O("SimpleDb", 'Database "' + this.name + '" requires upgrade from version:', t.oldVersion);
+                M("SimpleDb", 'Database "' + this.name + '" requires upgrade from version:', t.oldVersion);
                 const e = t.target.result;
                 this.bt.kt(e, s.transaction, t.oldVersion, this.version).next((() => {
-                    O("SimpleDb", "Database upgrade to version " + this.version + " complete");
+                    M("SimpleDb", "Database upgrade to version " + this.version + " complete");
                 }));
             };
-        }))), this.Mt && (this.db.onversionchange = t => this.Mt(t)), this.db;
+        }))), this.Ot && (this.db.onversionchange = t => this.Ot(t)), this.db;
     }
-    Ot(t) {
-        this.Mt = t, this.db && (this.db.onversionchange = e => t(e));
+    Mt(t) {
+        this.Ot = t, this.db && (this.db.onversionchange = e => t(e));
     }
     async runTransaction(t, e, n, s) {
         const i = "readonly" === e;
@@ -9147,11 +9151,11 @@ class Ii {
         for (;;) {
             ++r;
             try {
-                this.db = await this.Nt(t);
-                const e = Ii.open(this.db, t, i ? "readonly" : "readwrite", n), r = s(e).next((t => (e.Pt(), 
+                this.db = await this.xt(t);
+                const e = ii.open(this.db, t, i ? "readonly" : "readwrite", n), r = s(e).next((t => (e.Pt(), 
                 t))).catch((t => (
                 // Abort the transaction if there was an error.
-                e.abort(t), pi.reject(t)))).toPromise();
+                e.abort(t), si.reject(t)))).toPromise();
                 // As noted above, errors are propagated by aborting the transaction. So
                 // we swallow any error here to avoid the browser logging it as unhandled.
                 return r.catch((() => {})), 
@@ -9166,7 +9170,7 @@ class Ii {
                 // Note: We cannot use an instanceof check for FirestoreException, since the
                 // exception is wrapped in a generic error by our async/await handling.
                 const e = "FirebaseError" !== t.name && r < 3;
-                if (O("SimpleDb", "Transaction failed with error:", t.message, "Retrying:", e), 
+                if (M("SimpleDb", "Transaction failed with error:", t.message, "Retrying:", e), 
                 this.close(), !e) return Promise.reject(t);
             }
         }
@@ -9180,23 +9184,23 @@ class Ii {
  * A controller for iterating over a key range or index. It allows an iterate
  * callback to delete the currently-referenced object, or jump to a new key
  * within the key range or index.
- */ class Ei {
+ */ class oi {
     constructor(t) {
-        this.Ft = t, this.$t = !1, this.Bt = null;
+        this.$t = t, this.Ft = !1, this.Bt = null;
     }
     get isDone() {
-        return this.$t;
+        return this.Ft;
     }
     get Lt() {
         return this.Bt;
     }
     set cursor(t) {
-        this.Ft = t;
+        this.$t = t;
     }
     /**
      * This function can be called to stop iteration at any point.
      */    done() {
-        this.$t = !0;
+        this.Ft = !0;
     }
     /**
      * This function can be called to skip to that next key, which could be
@@ -9209,17 +9213,17 @@ class Ii {
      *
      * NOTE: You CANNOT do this with a keysOnly query.
      */    delete() {
-        return bi(this.Ft.delete());
+        return hi(this.$t.delete());
     }
 }
 
-/** An error that wraps exceptions that thrown during IndexedDB execution. */ class Ai extends Q {
+/** An error that wraps exceptions that thrown during IndexedDB execution. */ class ci extends j {
     constructor(t, e) {
         super(G.UNAVAILABLE, `IndexedDB transaction '${t}' failed: ${e}`), this.name = "IndexedDbTransactionError";
     }
 }
 
-/** Verifies whether `e` is an IndexedDbTransactionError. */ function Ri(t) {
+/** Verifies whether `e` is an IndexedDbTransactionError. */ function ui(t) {
     // Use name equality, as instanceof checks on errors don't work with errors
     // that wrap other errors.
     return "IndexedDbTransactionError" === t.name;
@@ -9234,14 +9238,14 @@ class Ii {
  * method return a PersistencePromise instead.
  * 3) Provides a higher-level API to avoid needing to do excessive wrapping of
  * intermediate IndexedDB types (IDBCursorWithValue, etc.)
- */ class Pi {
+ */ class ai {
     constructor(t) {
         this.store = t;
     }
     put(t, e) {
         let n;
-        return void 0 !== e ? (O("SimpleDb", "PUT", this.store.name, t, e), n = this.store.put(e, t)) : (O("SimpleDb", "PUT", this.store.name, "<auto-key>", t), 
-        n = this.store.put(t)), bi(n);
+        return void 0 !== e ? (M("SimpleDb", "PUT", this.store.name, t, e), n = this.store.put(e, t)) : (M("SimpleDb", "PUT", this.store.name, "<auto-key>", t), 
+        n = this.store.put(t)), hi(n);
     }
     /**
      * Adds a new value into an Object Store and returns the new key. Similar to
@@ -9250,8 +9254,8 @@ class Ii {
      * @param value - The object to write.
      * @returns The key of the value to add.
      */    add(t) {
-        O("SimpleDb", "ADD", this.store.name, t, t);
-        return bi(this.store.add(t));
+        M("SimpleDb", "ADD", this.store.name, t, t);
+        return hi(this.store.add(t));
     }
     /**
      * Gets the object with the specified key from the specified store, or null
@@ -9262,13 +9266,13 @@ class Ii {
      */    get(t) {
         // We're doing an unsafe cast to ValueType.
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        return bi(this.store.get(t)).next((e => (
+        return hi(this.store.get(t)).next((e => (
         // Normalize nonexistence to null.
-        void 0 === e && (e = null), O("SimpleDb", "GET", this.store.name, t, e), e)));
+        void 0 === e && (e = null), M("SimpleDb", "GET", this.store.name, t, e), e)));
     }
     delete(t) {
-        O("SimpleDb", "DELETE", this.store.name, t);
-        return bi(this.store.delete(t));
+        M("SimpleDb", "DELETE", this.store.name, t);
+        return hi(this.store.delete(t));
     }
     /**
      * If we ever need more of the count variants, we can add overloads. For now,
@@ -9276,8 +9280,8 @@ class Ii {
      *
      * Returns the number of rows in the store.
      */    count() {
-        O("SimpleDb", "COUNT", this.store.name);
-        return bi(this.store.count());
+        M("SimpleDb", "COUNT", this.store.name);
+        return hi(this.store.count());
     }
     qt(t, e) {
         const n = this.options(t, e);
@@ -9291,7 +9295,7 @@ class Ii {
         }
         {
             const t = this.store.getAll(n.range);
-            return new pi(((e, n) => {
+            return new si(((e, n) => {
                 t.onerror = t => {
                     n(t.target.error);
                 }, t.onsuccess = t => {
@@ -9300,27 +9304,14 @@ class Ii {
             }));
         }
     }
-    /**
-     * Loads the first `count` elements from the provided index range. Loads all
-     * elements if no limit is provided.
-     */    Gt(t, e) {
-        const n = this.store.getAll(t, null === e ? void 0 : e);
-        return new pi(((t, e) => {
-            n.onerror = t => {
-                e(t.target.error);
-            }, n.onsuccess = e => {
-                t(e.target.result);
-            };
-        }));
-    }
-    Qt(t, e) {
-        O("SimpleDb", "DELETE ALL", this.store.name);
+    Gt(t, e) {
+        M("SimpleDb", "DELETE ALL", this.store.name);
         const n = this.options(t, e);
         n.jt = !1;
         const s = this.cursor(n);
         return this.Kt(s, ((t, e, n) => n.delete()));
     }
-    Wt(t, e) {
+    Qt(t, e) {
         let n;
         e ? n = t : (n = {}, e = t);
         const s = this.cursor(n);
@@ -9333,11 +9324,11 @@ class Ii {
      *
      * The provided callback should return `true` to continue iteration, and
      * `false` otherwise.
-     */    zt(t) {
+     */    Wt(t) {
         const e = this.cursor({});
-        return new pi(((n, s) => {
+        return new si(((n, s) => {
             e.onerror = t => {
-                const e = vi(t.target.error);
+                const e = fi(t.target.error);
                 s(e);
             }, e.onsuccess = e => {
                 const s = e.target.result;
@@ -9349,20 +9340,20 @@ class Ii {
     }
     Kt(t, e) {
         const n = [];
-        return new pi(((s, i) => {
+        return new si(((s, i) => {
             t.onerror = t => {
                 i(t.target.error);
             }, t.onsuccess = t => {
                 const i = t.target.result;
                 if (!i) return void s();
-                const r = new Ei(i), o = e(i.primaryKey, i.value, r);
-                if (o instanceof pi) {
-                    const t = o.catch((t => (r.done(), pi.reject(t))));
+                const r = new oi(i), o = e(i.primaryKey, i.value, r);
+                if (o instanceof si) {
+                    const t = o.catch((t => (r.done(), si.reject(t))));
                     n.push(t);
                 }
                 r.isDone ? s() : null === r.Lt ? i.continue() : i.continue(r.Lt);
             };
-        })).next((() => pi.waitFor(n)));
+        })).next((() => si.waitFor(n)));
     }
     options(t, e) {
         let n;
@@ -9384,29 +9375,29 @@ class Ii {
 /**
  * Wraps an IDBRequest in a PersistencePromise, using the onsuccess / onerror
  * handlers to resolve / reject the PersistencePromise as appropriate.
- */ function bi(t) {
-    return new pi(((e, n) => {
+ */ function hi(t) {
+    return new si(((e, n) => {
         t.onsuccess = t => {
             const n = t.target.result;
             e(n);
         }, t.onerror = t => {
-            const e = vi(t.target.error);
+            const e = fi(t.target.error);
             n(e);
         };
     }));
 }
 
 // Guard so we only report the error once.
-let Vi = !1;
+let li = !1;
 
-function vi(t) {
-    const e = Ti.Vt(Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])());
+function fi(t) {
+    const e = ri.vt(Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getUA"])());
     if (e >= 12.2 && e < 13) {
         const e = "An internal error was encountered in the Indexed Database server";
         if (t.message.indexOf(e) >= 0) {
             // Wrap error in a more descriptive one.
-            const t = new Q("internal", `IOS_INDEXEDDB_BUG1: IndexedDb has thrown '${e}'. This is likely due to an unavoidable bug in iOS. See https://stackoverflow.com/q/56496296/110915 for details and a potential workaround.`);
-            return Vi || (Vi = !0, 
+            const t = new j("internal", `IOS_INDEXEDDB_BUG1: IndexedDb has thrown '${e}'. This is likely due to an unavoidable bug in iOS. See https://stackoverflow.com/q/56496296/110915 for details and a potential workaround.`);
+            return li || (li = !0, 
             // Throw a global exception outside of this promise chain, for the user to
             // potentially catch.
             setTimeout((() => {
@@ -9432,15 +9423,15 @@ function vi(t) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Si extends yi {
+ */ class di extends ni {
     constructor(t, e) {
-        super(), this.Ht = t, this.currentSequenceNumber = e;
+        super(), this.zt = t, this.currentSequenceNumber = e;
     }
 }
 
-function Di(t, e) {
+function _i(t, e) {
     const n = K(t);
-    return Ti.xt(n.Ht, e);
+    return ri.Nt(n.zt, e);
 }
 
 /**
@@ -9461,7 +9452,7 @@ function Di(t, e) {
  */
 /**
  * A batch of mutations that will be sent as one unit to the backend.
- */ class Ci {
+ */ class wi {
     /**
      * @param batchId - The unique ID of this mutation batch.
      * @param localWriteTime - The original write time of this mutation.
@@ -9488,7 +9479,7 @@ function Di(t, e) {
         for (let e = 0; e < this.mutations.length; e++) {
             const s = this.mutations[e];
             if (s.key.isEqual(t.key)) {
-                Tn(s, t, n[e]);
+                on(s, t, n[e]);
             }
         }
     }
@@ -9500,9 +9491,9 @@ function Di(t, e) {
      */    applyToLocalView(t) {
         // First, apply the base state. This allows us to apply non-idempotent
         // transform against a consistent set of values.
-        for (const e of this.baseMutations) e.key.isEqual(t.key) && En(e, t, this.localWriteTime);
+        for (const e of this.baseMutations) e.key.isEqual(t.key) && cn(e, t, this.localWriteTime);
         // Second, apply all user-provided mutations.
-                for (const e of this.mutations) e.key.isEqual(t.key) && En(e, t, this.localWriteTime);
+                for (const e of this.mutations) e.key.isEqual(t.key) && cn(e, t, this.localWriteTime);
     }
     /**
      * Computes the local view for all provided documents given the mutations in
@@ -9515,18 +9506,18 @@ function Di(t, e) {
             const n = t.get(e.key), s = n;
             // TODO(mutabledocuments): This method should take a MutableDocumentMap
             // and we should remove this cast.
-                        this.applyToLocalView(s), n.isValidDocument() || s.convertToNoDocument(ct.min());
+                        this.applyToLocalView(s), n.isValidDocument() || s.convertToNoDocument(at.min());
         }));
     }
     keys() {
-        return this.mutations.reduce(((t, e) => t.add(e.key)), Xn());
+        return this.mutations.reduce(((t, e) => t.add(e.key)), On());
     }
     isEqual(t) {
-        return this.batchId === t.batchId && ot(this.mutations, t.mutations, ((t, e) => Rn(t, e))) && ot(this.baseMutations, t.baseMutations, ((t, e) => Rn(t, e)));
+        return this.batchId === t.batchId && ot(this.mutations, t.mutations, ((t, e) => an(t, e))) && ot(this.baseMutations, t.baseMutations, ((t, e) => an(t, e)));
     }
 }
 
-/** The result of applying a mutation batch to the backend. */ class xi {
+/** The result of applying a mutation batch to the backend. */ class mi {
     constructor(t, e, n, 
     /**
      * A pre-computed mapping from each mutated document to the resulting
@@ -9541,10 +9532,10 @@ function Di(t, e) {
      * caches a document=&gt;version mapping (docVersions).
      */    static from(t, e, n) {
         U(t.mutations.length === n.length);
-        let s = Jn;
+        let s = xn;
         const i = t.mutations;
         for (let t = 0; t < i.length; t++) s = s.insert(i[t].key, n[t].version);
-        return new xi(t, e, n, s);
+        return new mi(t, e, n, s);
     }
 }
 
@@ -9569,7 +9560,7 @@ function Di(t, e) {
  *
  * Holds information about a mutation and the largest batch id in Firestore when
  * the mutation was created.
- */ class Ni {
+ */ class gi {
     constructor(t, e) {
         this.largestBatchId = t, this.mutation = e;
     }
@@ -9602,7 +9593,7 @@ function Di(t, e) {
  */
 /**
  * An immutable set of metadata that the local store tracks for each target.
- */ class ki {
+ */ class yi {
     constructor(
     /** The target being listened to. */
     t, 
@@ -9619,11 +9610,11 @@ function Di(t, e) {
      */
     s, 
     /** The latest snapshot version seen for this target. */
-    i = ct.min()
+    i = at.min()
     /**
      * The maximum snapshot version at which the associated view
      * contained no limbo documents.
-     */ , r = ct.min()
+     */ , r = at.min()
     /**
      * An opaque, server-assigned token that allows watching a target to be
      * resumed after disconnecting without retransmitting all the data that
@@ -9634,19 +9625,19 @@ function Di(t, e) {
         this.lastLimboFreeSnapshotVersion = r, this.resumeToken = o;
     }
     /** Creates a new target data instance with an updated sequence number. */    withSequenceNumber(t) {
-        return new ki(this.target, this.targetId, this.purpose, t, this.snapshotVersion, this.lastLimboFreeSnapshotVersion, this.resumeToken);
+        return new yi(this.target, this.targetId, this.purpose, t, this.snapshotVersion, this.lastLimboFreeSnapshotVersion, this.resumeToken);
     }
     /**
      * Creates a new target data instance with an updated resume token and
      * snapshot version.
      */    withResumeToken(t, e) {
-        return new ki(this.target, this.targetId, this.purpose, this.sequenceNumber, e, this.lastLimboFreeSnapshotVersion, t);
+        return new yi(this.target, this.targetId, this.purpose, this.sequenceNumber, e, this.lastLimboFreeSnapshotVersion, t);
     }
     /**
      * Creates a new target data instance with an updated last limbo free
      * snapshot version number.
      */    withLastLimboFreeSnapshotVersion(t) {
-        return new ki(this.target, this.targetId, this.purpose, this.sequenceNumber, this.snapshotVersion, t, this.resumeToken);
+        return new yi(this.target, this.targetId, this.purpose, this.sequenceNumber, this.snapshotVersion, t, this.resumeToken);
     }
 }
 
@@ -9666,79 +9657,81 @@ function Di(t, e) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** Serializer for values stored in the LocalStore. */ class Mi {
+/** Serializer for values stored in the LocalStore. */ class pi {
     constructor(t) {
-        this.Jt = t;
+        this.Ht = t;
     }
 }
 
-/** Decodes a remote document from storage locally to a Document. */ function Oi(t, e) {
+/** Decodes a remote document from storage locally to a Document. */ function Ii(t, e) {
     let n;
-    if (e.document) n = bs(t.Jt, e.document, !!e.hasCommittedMutations); else if (e.noDocument) {
-        const t = xt.fromSegments(e.noDocument.path), s = Li(e.noDocument.readTime);
-        n = ne.newNoDocument(t, s), e.hasCommittedMutations && n.setHasCommittedMutations();
+    if (e.document) n = as(t.Ht, e.document, !!e.hasCommittedMutations); else if (e.noDocument) {
+        const t = Nt.fromSegments(e.noDocument.path), s = Pi(e.noDocument.readTime);
+        n = Jt.newNoDocument(t, s), e.hasCommittedMutations && n.setHasCommittedMutations();
     } else {
         if (!e.unknownDocument) return L();
         {
-            const t = xt.fromSegments(e.unknownDocument.path), s = Li(e.unknownDocument.version);
-            n = ne.newUnknownDocument(t, s);
+            const t = Nt.fromSegments(e.unknownDocument.path), s = Pi(e.unknownDocument.version);
+            n = Jt.newUnknownDocument(t, s);
         }
     }
-    return e.readTime && n.setReadTime(function(t) {
-        const e = new at(t[0], t[1]);
-        return ct.fromTimestamp(e);
-    }(e.readTime)), n;
+    return e.readTime && n.setReadTime(Ai(e.readTime)), n;
 }
 
-/** Encodes a document for storage locally. */ function Fi(t, e) {
-    const n = e.key, s = {
-        prefixPath: n.getCollectionPath().popLast().toArray(),
-        collectionGroup: n.collectionGroup,
-        documentId: n.path.lastSegment(),
-        readTime: $i(e.readTime),
-        hasCommittedMutations: e.hasCommittedMutations
-    };
-    if (e.isFoundDocument()) s.document = function(t, e) {
-        return {
-            name: ps(t, e.key),
-            fields: e.data.value.mapValue.fields,
-            updateTime: ds(t, e.version.toTimestamp())
-        };
-    }(t.Jt, e); else if (e.isNoDocument()) s.noDocument = {
-        path: n.path.toArray(),
-        readTime: Bi(e.version)
-    }; else {
-        if (!e.isUnknownDocument()) return L();
-        s.unknownDocument = {
-            path: n.path.toArray(),
-            version: Bi(e.version)
-        };
+/** Encodes a document for storage locally. */ function Ei(t, e) {
+    const n = Ti(e.readTime), s = e.key.path.popLast().toArray();
+    if (e.isFoundDocument()) {
+        const i = function(t, e) {
+            return {
+                name: ns(t, e.key),
+                fields: e.data.value.mapValue.fields,
+                updateTime: Jn(t, e.version.toTimestamp())
+            };
+        }(t.Ht, e), r = e.hasCommittedMutations;
+        return new Bs(
+        /* unknownDocument= */ null, 
+        /* noDocument= */ null, i, r, n, s);
     }
-    return s;
+    if (e.isNoDocument()) {
+        const t = e.key.path.toArray(), i = Ri(e.version), r = e.hasCommittedMutations;
+        return new Bs(
+        /* unknownDocument= */ null, new $s(t, i), 
+        /* document= */ null, r, n, s);
+    }
+    if (e.isUnknownDocument()) {
+        const t = e.key.path.toArray(), i = Ri(e.version);
+        return new Bs(new Fs(t, i), 
+        /* noDocument= */ null, 
+        /* document= */ null, 
+        /* hasCommittedMutations= */ !0, n, s);
+    }
+    return L();
 }
 
-function $i(t) {
+function Ti(t) {
     const e = t.toTimestamp();
     return [ e.seconds, e.nanoseconds ];
 }
 
-function Bi(t) {
-    const e = t.toTimestamp();
-    return {
-        seconds: e.seconds,
-        nanoseconds: e.nanoseconds
-    };
+function Ai(t) {
+    const e = new ut(t[0], t[1]);
+    return at.fromTimestamp(e);
 }
 
-function Li(t) {
-    const e = new at(t.seconds, t.nanoseconds);
-    return ct.fromTimestamp(e);
+function Ri(t) {
+    const e = t.toTimestamp();
+    return new Ns(e.seconds, e.nanoseconds);
+}
+
+function Pi(t) {
+    const e = new ut(t.seconds, t.nanoseconds);
+    return at.fromTimestamp(e);
 }
 
 /** Encodes a batch of mutations into a DbMutationBatch for local storage. */
 /** Decodes a DbMutationBatch into a MutationBatch */
-function Ui(t, e) {
-    const n = (e.baseMutations || []).map((e => Ds(t.Jt, e)));
+function bi(t, e) {
+    const n = (e.baseMutations || []).map((e => ds(t.Ht, e)));
     // Squash old transform mutations into existing patch or set mutations.
     // The replacement of representing `transforms` with `update_transforms`
     // on the SDK means that old `transform` mutations stored in IndexedDB need
@@ -9752,37 +9745,29 @@ function Ui(t, e) {
             ++t;
         }
     }
-    const s = e.mutations.map((e => Ds(t.Jt, e))), i = at.fromMillis(e.localWriteTimeMs);
-    return new Ci(e.batchId, i, n, s);
+    const s = e.mutations.map((e => ds(t.Ht, e))), i = ut.fromMillis(e.localWriteTimeMs);
+    return new wi(e.batchId, i, n, s);
 }
 
-/** Decodes a DbTarget into TargetData */ function qi(t) {
-    const e = Li(t.readTime), n = void 0 !== t.lastLimboFreeSnapshotVersion ? Li(t.lastLimboFreeSnapshotVersion) : ct.min();
+/** Decodes a DbTarget into TargetData */ function vi(t) {
+    const e = Pi(t.readTime), n = void 0 !== t.lastLimboFreeSnapshotVersion ? Pi(t.lastLimboFreeSnapshotVersion) : at.min();
     let s;
     var i;
     return void 0 !== t.query.documents ? (U(1 === (i = t.query).documents.length), 
-    s = Ge(Fe(Es(i.documents[0])))) : s = function(t) {
-        return Ge(ks(t));
-    }(t.query), new ki(s, t.targetId, 0 /* Listen */ , t.lastListenSequenceNumber, e, n, pt.fromBase64String(t.resumeToken));
+    s = De(Ae(rs(i.documents[0])))) : s = function(t) {
+        return De(gs(t));
+    }(t.query), new yi(s, t.targetId, 0 /* Listen */ , t.lastListenSequenceNumber, e, n, pt.fromBase64String(t.resumeToken));
 }
 
-/** Encodes TargetData into a DbTarget for storage locally. */ function Ki(t, e) {
-    const n = Bi(e.snapshotVersion), s = Bi(e.lastLimboFreeSnapshotVersion);
+/** Encodes TargetData into a DbTarget for storage locally. */ function Vi(t, e) {
+    const n = Ri(e.snapshotVersion), s = Ri(e.lastLimboFreeSnapshotVersion);
     let i;
-    i = ge(e.target) ? xs(t.Jt, e.target) : Ns(t.Jt, e.target);
+    i = oe(e.target) ? ws(t.Ht, e.target) : ms(t.Ht, e.target);
     // We can't store the resumeToken as a ByteString in IndexedDb, so we
     // convert it to a base64 string for storage.
         const r = e.resumeToken.toBase64();
     // lastListenSequenceNumber is always 0 until we do real GC.
-        return {
-        targetId: e.targetId,
-        canonicalId: _e(e.target),
-        readTime: n,
-        resumeToken: r,
-        lastListenSequenceNumber: e.sequenceNumber,
-        lastLimboFreeSnapshotVersion: s,
-        query: i
-    };
+        return new Us(e.targetId, se(e.target), n, r, e.sequenceNumber, s, i);
 }
 
 /**
@@ -9794,18 +9779,18 @@ function Ui(t, e) {
  * This reconstructs the original query used to build the bundle being loaded,
  * including features exists only in SDKs (for example: limit-to-last).
  */
-function Gi(t) {
-    const e = ks({
+function Si(t) {
+    const e = gs({
         parent: t.parent,
         structuredQuery: t.structuredQuery
     });
-    return "LAST" === t.limitType ? Qe(e, e.limit, "L" /* Last */) : e;
+    return "LAST" === t.limitType ? Ce(e, e.limit, "L" /* Last */) : e;
 }
 
 /** Encodes a NamedQuery proto object to a NamedQuery model object. */
 /** Encodes a DbDocumentOverlay object to an Overlay model object. */
-function Qi(t, e) {
-    return new Ni(e.largestBatchId, Ds(t.Jt, e.overlayMutation));
+function Di(t, e) {
+    return new gi(e.largestBatchId, ds(t.Ht, e.overlayMutation));
 }
 
 /** Decodes an Overlay model object into a DbDocumentOverlay object. */
@@ -9813,9 +9798,9 @@ function Qi(t, e) {
  * Returns the DbDocumentOverlayKey corresponding to the given user and
  * document key.
  */
-function ji(t, e) {
+function Ci(t, e) {
     const n = e.path.lastSegment();
-    return [ t, Qs(e.path.popLast()), n ];
+    return [ t, Vs(e.path.popLast()), n ];
 }
 
 /**
@@ -9834,12 +9819,12 @@ function ji(t, e) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-class Wi {
+class Ni {
     getBundleMetadata(t, e) {
-        return zi(t).get(e).next((t => {
+        return xi(t).get(e).next((t => {
             if (t) return {
                 id: (e = t).bundleId,
-                createTime: Li(e.createTime),
+                createTime: Pi(e.createTime),
                 version: e.version
             };
             /** Encodes a DbBundle to a BundleMetadata object. */
@@ -9847,28 +9832,28 @@ class Wi {
             /** Encodes a BundleMetadata to a DbBundle. */        }));
     }
     saveBundleMetadata(t, e) {
-        return zi(t).put({
+        return xi(t).put({
             bundleId: (n = e).id,
-            createTime: Bi(ms(n.createTime)),
+            createTime: Ri(Zn(n.createTime)),
             version: n.version
         });
         var n;
         /** Encodes a DbNamedQuery to a NamedQuery. */    }
     getNamedQuery(t, e) {
-        return Hi(t).get(e).next((t => {
+        return ki(t).get(e).next((t => {
             if (t) return {
                 name: (e = t).name,
-                query: Gi(e.bundledQuery),
-                readTime: Li(e.readTime)
+                query: Si(e.bundledQuery),
+                readTime: Pi(e.readTime)
             };
             var e;
             /** Encodes a NamedQuery from a bundle proto to a DbNamedQuery. */        }));
     }
     saveNamedQuery(t, e) {
-        return Hi(t).put(function(t) {
+        return ki(t).put(function(t) {
             return {
                 name: t.name,
-                readTime: Bi(ms(t.readTime)),
+                readTime: Ri(Zn(t.readTime)),
                 bundledQuery: t.bundledQuery
             };
         }(e));
@@ -9877,14 +9862,14 @@ class Wi {
 
 /**
  * Helper to get a typed SimpleDbStore for the bundles object store.
- */ function zi(t) {
-    return Di(t, "bundles");
+ */ function xi(t) {
+    return _i(t, Qs.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the namedQueries object store.
- */ function Hi(t) {
-    return Di(t, "namedQueries");
+ */ function ki(t) {
+    return _i(t, Ws.store);
 }
 
 /**
@@ -9905,89 +9890,82 @@ class Wi {
  */
 /**
  * Implementation of DocumentOverlayCache using IndexedDb.
- */ class Ji {
+ */ class Oi {
     /**
      * @param serializer - The document serializer.
      * @param userId - The userId for which we are accessing overlays.
      */
     constructor(t, e) {
-        this.M = t, this.userId = e;
+        this.O = t, this.userId = e;
     }
-    static Yt(t, e) {
+    static Jt(t, e) {
         const n = e.uid || "";
-        return new Ji(t, n);
+        return new Oi(t, n);
     }
     getOverlay(t, e) {
-        return Yi(t).get(ji(this.userId, e)).next((t => t ? Qi(this.M, t) : null));
+        return Mi(t).get(Ci(this.userId, e)).next((t => t ? Di(this.O, t) : null));
     }
     saveOverlays(t, e, n) {
         const s = [];
-        return n.forEach(((n, i) => {
-            const r = new Ni(e, i);
-            s.push(this.Xt(t, r));
-        })), pi.waitFor(s);
+        return n.forEach((n => {
+            const i = new gi(e, n);
+            s.push(this.Yt(t, i));
+        })), si.waitFor(s);
     }
     removeOverlaysForBatchId(t, e, n) {
         const s = new Set;
         // Get the set of unique collection paths.
-                e.forEach((t => s.add(Qs(t.getCollectionPath()))));
+                e.forEach((t => s.add(Vs(t.getCollectionPath()))));
         const i = [];
         return s.forEach((e => {
             const s = IDBKeyRange.bound([ this.userId, e, n ], [ this.userId, e, n + 1 ], 
             /*lowerOpen=*/ !1, 
             /*upperOpen=*/ !0);
-            i.push(Yi(t).Qt("collectionPathOverlayIndex", s));
-        })), pi.waitFor(i);
+            i.push(Mi(t).Gt(Ys.collectionPathOverlayIndex, s));
+        })), si.waitFor(i);
     }
     getOverlaysForCollection(t, e, n) {
-        const s = Hn(), i = Qs(e), r = IDBKeyRange.bound([ this.userId, i, n ], [ this.userId, i, Number.POSITIVE_INFINITY ], 
+        const s = new Map, i = Vs(e), r = IDBKeyRange.bound([ this.userId, i, n ], [ this.userId, i, Number.POSITIVE_INFINITY ], 
         /*lowerOpen=*/ !0);
-        return Yi(t).qt("collectionPathOverlayIndex", r).next((t => {
+        return Mi(t).qt(Ys.collectionPathOverlayIndex, r).next((t => {
             for (const e of t) {
-                const t = Qi(this.M, e);
+                const t = Di(this.O, e);
                 s.set(t.getKey(), t);
             }
             return s;
         }));
     }
     getOverlaysForCollectionGroup(t, e, n, s) {
-        const i = Hn();
+        const i = new Map;
         let r;
         // We want batch IDs larger than `sinceBatchId`, and so the lower bound
         // is not inclusive.
                 const o = IDBKeyRange.bound([ this.userId, e, n ], [ this.userId, e, Number.POSITIVE_INFINITY ], 
         /*lowerOpen=*/ !0);
-        return Yi(t).Wt({
-            index: "collectionGroupOverlayIndex",
+        return Mi(t).Qt({
+            index: Ys.collectionGroupOverlayIndex,
             range: o
         }, ((t, e, n) => {
             // We do not want to return partial batch overlays, even if the size
             // of the result set exceeds the given `count` argument. Therefore, we
             // continue to aggregate results even after the result size exceeds
             // `count` if there are more overlays from the `currentBatchId`.
-            const o = Qi(this.M, e);
-            i.size() < s || o.largestBatchId === r ? (i.set(o.getKey(), o), r = o.largestBatchId) : n.done();
+            const o = Di(this.O, e);
+            i.size < s || o.largestBatchId === r ? (i.set(o.getKey(), o), r = o.largestBatchId) : n.done();
         })).next((() => i));
     }
-    Xt(t, e) {
-        return Yi(t).put(function(t, e, n) {
-            const [s, i, r] = ji(e, n.mutation.key);
-            return {
-                userId: e,
-                collectionPath: i,
-                documentId: r,
-                collectionGroup: n.mutation.key.getCollectionGroup(),
-                largestBatchId: n.largestBatchId,
-                overlayMutation: Ss(t.Jt, n.mutation)
-            };
-        }(this.M, this.userId, e));
+    Yt(t, e) {
+        return Mi(t).put(function(t, e, n) {
+            const [s, i, r] = Ci(e, n.mutation.key);
+            return new Ys(e, i, r, n.mutation.key.getCollectionGroup(), n.largestBatchId, fs(t.Ht, n.mutation));
+        }(this.O, this.userId, e));
     }
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the document overlay object store.
- */ function Yi(t) {
-    return Di(t, "documentOverlays");
+ */ function Mi(t) {
+    return _i(t, Ys.store);
 }
 
 /**
@@ -10009,7 +9987,7 @@ class Wi {
 // Note: This code is copied from the backend. Code that is not used by
 // Firestore was removed.
 /** Firestore index value writer.  */
-class Xi {
+class $i {
     constructor() {}
     // The write methods below short-circuit writing terminators for values
     // containing a (terminating) truncated value.
@@ -10018,70 +9996,70 @@ class Xi {
     // ["bar", [2, truncated("foo")]] -> (STRING, "bar", TERM, ARRAY, NUMBER, 2, STRING, "foo", TRUNC)
     // ["bar", truncated(["foo"])] -> (STRING, "bar", TERM, ARRAY. STRING, "foo", TERM, TRUNC)
     /** Writes an index value.  */
-    Zt(t, e) {
-        this.te(t, e), 
+    Xt(t, e) {
+        this.Zt(t, e), 
         // Write separator to split index values
         // (see go/firestore-storage-format#encodings).
-        e.ee();
+        e.te();
     }
-    te(t, e) {
-        if ("nullValue" in t) this.ne(e, 5); else if ("booleanValue" in t) this.ne(e, 10), 
-        e.se(t.booleanValue ? 1 : 0); else if ("integerValue" in t) this.ne(e, 15), e.se(Et(t.integerValue)); else if ("doubleValue" in t) {
-            const n = Et(t.doubleValue);
-            isNaN(n) ? this.ne(e, 13) : (this.ne(e, 15), Dt(n) ? 
+    Zt(t, e) {
+        if ("nullValue" in t) this.ee(e, 5); else if ("booleanValue" in t) this.ee(e, 10), 
+        e.ne(t.booleanValue ? 1 : 0); else if ("integerValue" in t) this.ee(e, 15), e.ne(Tt(t.integerValue)); else if ("doubleValue" in t) {
+            const n = Tt(t.doubleValue);
+            isNaN(n) ? this.ee(e, 13) : (this.ee(e, 15), Dt(n) ? 
             // -0.0, 0 and 0.0 are all considered the same
-            e.se(0) : e.se(n));
+            e.ne(0) : e.ne(n));
         } else if ("timestampValue" in t) {
             const n = t.timestampValue;
-            this.ne(e, 20), "string" == typeof n ? e.ie(n) : (e.ie(`${n.seconds || ""}`), e.se(n.nanos || 0));
-        } else if ("stringValue" in t) this.re(t.stringValue, e), this.oe(e); else if ("bytesValue" in t) this.ne(e, 30), 
-        e.ue(At(t.bytesValue)), this.oe(e); else if ("referenceValue" in t) this.ae(t.referenceValue, e); else if ("geoPointValue" in t) {
+            this.ee(e, 20), "string" == typeof n ? e.se(n) : (e.se(`${n.seconds || ""}`), e.ne(n.nanos || 0));
+        } else if ("stringValue" in t) this.ie(t.stringValue, e), this.re(e); else if ("bytesValue" in t) this.ee(e, 30), 
+        e.oe(At(t.bytesValue)), this.re(e); else if ("referenceValue" in t) this.ce(t.referenceValue, e); else if ("geoPointValue" in t) {
             const n = t.geoPointValue;
-            this.ne(e, 45), e.se(n.latitude || 0), e.se(n.longitude || 0);
-        } else "mapValue" in t ? Ht(t) ? this.ne(e, Number.MAX_SAFE_INTEGER) : (this.ce(t.mapValue, e), 
-        this.oe(e)) : "arrayValue" in t ? (this.he(t.arrayValue, e), this.oe(e)) : L();
+            this.ee(e, 45), e.ne(n.latitude || 0), e.ne(n.longitude || 0);
+        } else "mapValue" in t ? Ot(t, xt) ? this.ee(e, Number.MAX_SAFE_INTEGER) : (this.ue(t.mapValue, e), 
+        this.re(e)) : "arrayValue" in t ? (this.ae(t.arrayValue, e), this.re(e)) : L();
     }
-    re(t, e) {
-        this.ne(e, 25), this.le(t, e);
-    }
-    le(t, e) {
-        e.ie(t);
-    }
-    ce(t, e) {
-        const n = t.fields || {};
-        this.ne(e, 55);
-        for (const t of Object.keys(n)) this.re(t, e), this.te(n[t], e);
+    ie(t, e) {
+        this.ee(e, 25), this.he(t, e);
     }
     he(t, e) {
-        const n = t.values || [];
-        this.ne(e, 50);
-        for (const t of n) this.te(t, e);
+        e.se(t);
+    }
+    ue(t, e) {
+        const n = t.fields || {};
+        this.ee(e, 55);
+        for (const t of Object.keys(n)) this.ie(t, e), this.Zt(n[t], e);
     }
     ae(t, e) {
-        this.ne(e, 37);
-        xt.fromName(t).path.forEach((t => {
-            this.ne(e, 60), this.le(t, e);
+        const n = t.values || [];
+        this.ee(e, 50);
+        for (const t of n) this.Zt(t, e);
+    }
+    ce(t, e) {
+        this.ee(e, 37);
+        Nt.fromName(t).path.forEach((t => {
+            this.ee(e, 60), this.he(t, e);
         }));
     }
-    ne(t, e) {
-        t.se(e);
+    ee(t, e) {
+        t.ne(e);
     }
-    oe(t) {
+    re(t) {
         // While the SDK does not implement truncation, the truncation marker is
         // used to terminate all variable length values (which are strings, bytes,
         // references, arrays and maps).
-        t.se(2);
+        t.ne(2);
     }
 }
 
-Xi.fe = new Xi;
+$i.le = new $i;
 
 /**
  * Counts the number of zeros in a byte.
  *
  * Visible for testing.
  */
-function Zi(t) {
+function Fi(t) {
     if (0 === t) return 8;
     let e = 0;
     return t >> 4 == 0 && (
@@ -10098,12 +10076,12 @@ function Zi(t) {
  * Returns the number of bytes required to store "value". Leading zero bytes
  * are skipped.
  */
-function tr(t) {
+function Bi(t) {
     // This is just the number of bytes for the unsigned representation of the number.
     const e = 64 - function(t) {
         let e = 0;
         for (let n = 0; n < 8; ++n) {
-            const s = Zi(255 & t[n]);
+            const s = Fi(255 & t[n]);
             if (e += s, 8 !== s) break;
         }
         return e;
@@ -10116,72 +10094,72 @@ function tr(t) {
  * behavior defined by the backend.
  *
  * The code is ported from its Java counterpart.
- */ class er {
+ */ class Li {
     constructor() {
         this.buffer = new Uint8Array(1024), this.position = 0;
     }
-    de(t) {
+    fe(t) {
         const e = t[Symbol.iterator]();
         let n = e.next();
-        for (;!n.done; ) this._e(n.value), n = e.next();
-        this.we();
+        for (;!n.done; ) this.de(n.value), n = e.next();
+        this._e();
     }
-    me(t) {
+    we(t) {
         const e = t[Symbol.iterator]();
         let n = e.next();
-        for (;!n.done; ) this.ge(n.value), n = e.next();
-        this.ye();
+        for (;!n.done; ) this.me(n.value), n = e.next();
+        this.ge();
     }
-    /** Writes utf8 bytes into this byte sequence, ascending. */    pe(t) {
+    /** Writes utf8 bytes into this byte sequence, ascending. */    ye(t) {
         for (const e of t) {
             const t = e.charCodeAt(0);
-            if (t < 128) this._e(t); else if (t < 2048) this._e(960 | t >>> 6), this._e(128 | 63 & t); else if (e < "\ud800" || "\udbff" < e) this._e(480 | t >>> 12), 
-            this._e(128 | 63 & t >>> 6), this._e(128 | 63 & t); else {
+            if (t < 128) this.de(t); else if (t < 2048) this.de(960 | t >>> 6), this.de(128 | 63 & t); else if (e < "\ud800" || "\udbff" < e) this.de(480 | t >>> 12), 
+            this.de(128 | 63 & t >>> 6), this.de(128 | 63 & t); else {
                 const t = e.codePointAt(0);
-                this._e(240 | t >>> 18), this._e(128 | 63 & t >>> 12), this._e(128 | 63 & t >>> 6), 
-                this._e(128 | 63 & t);
+                this.de(240 | t >>> 18), this.de(128 | 63 & t >>> 12), this.de(128 | 63 & t >>> 6), 
+                this.de(128 | 63 & t);
             }
         }
-        this.we();
+        this._e();
     }
-    /** Writes utf8 bytes into this byte sequence, descending */    Ie(t) {
+    /** Writes utf8 bytes into this byte sequence, descending */    pe(t) {
         for (const e of t) {
             const t = e.charCodeAt(0);
-            if (t < 128) this.ge(t); else if (t < 2048) this.ge(960 | t >>> 6), this.ge(128 | 63 & t); else if (e < "\ud800" || "\udbff" < e) this.ge(480 | t >>> 12), 
-            this.ge(128 | 63 & t >>> 6), this.ge(128 | 63 & t); else {
+            if (t < 128) this.me(t); else if (t < 2048) this.me(960 | t >>> 6), this.me(128 | 63 & t); else if (e < "\ud800" || "\udbff" < e) this.me(480 | t >>> 12), 
+            this.me(128 | 63 & t >>> 6), this.me(128 | 63 & t); else {
                 const t = e.codePointAt(0);
-                this.ge(240 | t >>> 18), this.ge(128 | 63 & t >>> 12), this.ge(128 | 63 & t >>> 6), 
-                this.ge(128 | 63 & t);
+                this.me(240 | t >>> 18), this.me(128 | 63 & t >>> 12), this.me(128 | 63 & t >>> 6), 
+                this.me(128 | 63 & t);
             }
         }
-        this.ye();
+        this.ge();
     }
-    Te(t) {
+    Ie(t) {
         // Values are encoded with a single byte length prefix, followed by the
         // actual value in big-endian format with leading 0 bytes dropped.
-        const e = this.Ee(t), n = tr(e);
-        this.Ae(1 + n), this.buffer[this.position++] = 255 & n;
+        const e = this.Ee(t), n = Bi(e);
+        this.Te(1 + n), this.buffer[this.position++] = 255 & n;
         // Write the length
         for (let t = e.length - n; t < e.length; ++t) this.buffer[this.position++] = 255 & e[t];
     }
-    Re(t) {
+    Ae(t) {
         // Values are encoded with a single byte length prefix, followed by the
         // inverted value in big-endian format with leading 0 bytes dropped.
-        const e = this.Ee(t), n = tr(e);
-        this.Ae(1 + n), this.buffer[this.position++] = ~(255 & n);
+        const e = this.Ee(t), n = Bi(e);
+        this.Te(1 + n), this.buffer[this.position++] = ~(255 & n);
         // Write the length
         for (let t = e.length - n; t < e.length; ++t) this.buffer[this.position++] = ~(255 & e[t]);
     }
     /**
      * Writes the "infinity" byte sequence that sorts after all other byte
      * sequences written in ascending order.
-     */    Pe() {
-        this.be(255), this.be(255);
+     */    Re() {
+        this.Pe(255), this.Pe(255);
     }
     /**
      * Writes the "infinity" byte sequence that sorts before all other byte
      * sequences written in descending order.
-     */    Ve() {
+     */    be() {
         this.ve(255), this.ve(255);
     }
     /**
@@ -10191,9 +10169,9 @@ function tr(t) {
         this.position = 0;
     }
     seed(t) {
-        this.Ae(t.length), this.buffer.set(t, this.position), this.position += t.length;
+        this.Te(t.length), this.buffer.set(t, this.position), this.position += t.length;
     }
-    /** Makes a copy of the encoded bytes in this buffer.  */    Se() {
+    /** Makes a copy of the encoded bytes in this buffer.  */    Ve() {
         return this.buffer.slice(0, this.position);
     }
     /**
@@ -10216,27 +10194,27 @@ function tr(t) {
         for (let t = 1; t < e.length; ++t) e[t] ^= n ? 255 : 0;
         return e;
     }
-    /** Writes a single byte ascending to the buffer. */    _e(t) {
+    /** Writes a single byte ascending to the buffer. */    de(t) {
         const e = 255 & t;
-        0 === e ? (this.be(0), this.be(255)) : 255 === e ? (this.be(255), this.be(0)) : this.be(e);
+        0 === e ? (this.Pe(0), this.Pe(255)) : 255 === e ? (this.Pe(255), this.Pe(0)) : this.Pe(e);
     }
-    /** Writes a single byte descending to the buffer.  */    ge(t) {
+    /** Writes a single byte descending to the buffer.  */    me(t) {
         const e = 255 & t;
         0 === e ? (this.ve(0), this.ve(255)) : 255 === e ? (this.ve(255), this.ve(0)) : this.ve(t);
     }
-    we() {
-        this.be(0), this.be(1);
+    _e() {
+        this.Pe(0), this.Pe(1);
     }
-    ye() {
+    ge() {
         this.ve(0), this.ve(1);
     }
-    be(t) {
-        this.Ae(1), this.buffer[this.position++] = t;
+    Pe(t) {
+        this.Te(1), this.buffer[this.position++] = t;
     }
     ve(t) {
-        this.Ae(1), this.buffer[this.position++] = ~t;
+        this.Te(1), this.buffer[this.position++] = ~t;
     }
-    Ae(t) {
+    Te(t) {
         const e = t + this.position;
         if (e <= this.buffer.length) return;
         // Try doubling.
@@ -10250,60 +10228,60 @@ function tr(t) {
     }
 }
 
-class nr {
+class Ui {
     constructor(t) {
-        this.De = t;
+        this.Se = t;
     }
-    ue(t) {
-        this.De.de(t);
-    }
-    ie(t) {
-        this.De.pe(t);
+    oe(t) {
+        this.Se.fe(t);
     }
     se(t) {
-        this.De.Te(t);
+        this.Se.ye(t);
     }
-    ee() {
-        this.De.Pe();
+    ne(t) {
+        this.Se.Ie(t);
+    }
+    te() {
+        this.Se.Re();
     }
 }
 
-class sr {
+class qi {
     constructor(t) {
-        this.De = t;
+        this.Se = t;
     }
-    ue(t) {
-        this.De.me(t);
-    }
-    ie(t) {
-        this.De.Ie(t);
+    oe(t) {
+        this.Se.we(t);
     }
     se(t) {
-        this.De.Re(t);
+        this.Se.pe(t);
     }
-    ee() {
-        this.De.Ve();
+    ne(t) {
+        this.Se.Ae(t);
+    }
+    te() {
+        this.Se.be();
     }
 }
 
 /**
  * Implements `DirectionalIndexByteEncoder` using `OrderedCodeWriter` for the
  * actual encoding.
- */ class ir {
+ */ class Ki {
     constructor() {
-        this.De = new er, this.Ce = new nr(this.De), this.xe = new sr(this.De);
+        this.Se = new Li, this.De = new Ui(this.Se), this.Ce = new qi(this.Se);
     }
     seed(t) {
-        this.De.seed(t);
+        this.Se.seed(t);
     }
     Ne(t) {
-        return 0 /* ASCENDING */ === t ? this.Ce : this.xe;
+        return 0 /* ASCENDING */ === t ? this.De : this.Ce;
     }
-    Se() {
-        return this.De.Se();
+    Ve() {
+        return this.Se.Ve();
     }
     reset() {
-        this.De.reset();
+        this.Se.reset();
     }
 }
 
@@ -10323,137 +10301,24 @@ class sr {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** Represents an index entry saved by the SDK in persisted storage. */ class rr {
+/** Represents an index entry saved by the SDK in persisted storage. */ class Gi {
     constructor(t, e, n, s) {
         this.indexId = t, this.documentKey = e, this.arrayValue = n, this.directionalValue = s;
     }
-    /**
-     * Returns an IndexEntry entry that sorts immediately after the current
-     * directional value.
-     */    ke() {
-        const t = this.directionalValue.length, e = 0 === t || 255 === this.directionalValue[t - 1] ? t + 1 : t, n = new Uint8Array(e);
-        return n.set(this.directionalValue, 0), e !== t ? n.set([ 0 ], this.directionalValue.length) : ++n[n.length - 1], 
-        new rr(this.indexId, this.documentKey, this.arrayValue, n);
-    }
 }
 
-function or(t, e) {
+function ji(t, e) {
     let n = t.indexId - e.indexId;
-    return 0 !== n ? n : (n = ur(t.arrayValue, e.arrayValue), 0 !== n ? n : (n = ur(t.directionalValue, e.directionalValue), 
-    0 !== n ? n : xt.comparator(t.documentKey, e.documentKey)));
+    return 0 !== n ? n : (n = Nt.comparator(t.documentKey, e.documentKey), 0 !== n ? n : (n = Qi(t.arrayValue, e.arrayValue), 
+    0 !== n ? n : Qi(t.directionalValue, e.directionalValue)));
 }
 
-function ur(t, e) {
+function Qi(t, e) {
     for (let n = 0; n < t.length && n < e.length; ++n) {
         const s = t[n] - e[n];
         if (0 !== s) return s;
     }
     return t.length - e.length;
-}
-
-/**
- * @license
- * Copyright 2022 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-/**
- * A light query planner for Firestore.
- *
- * This class matches a `FieldIndex` against a Firestore Query `Target`. It
- * determines whether a given index can be used to serve the specified target.
- *
- * The following table showcases some possible index configurations:
- *
- * Query                                               | Index
- * -----------------------------------------------------------------------------
- * where('a', '==', 'a').where('b', '==', 'b')         | a ASC, b DESC
- * where('a', '==', 'a').where('b', '==', 'b')         | a ASC
- * where('a', '==', 'a').where('b', '==', 'b')         | b DESC
- * where('a', '>=', 'a').orderBy('a')                  | a ASC
- * where('a', '>=', 'a').orderBy('a', 'desc')          | a DESC
- * where('a', '>=', 'a').orderBy('a').orderBy('b')     | a ASC, b ASC
- * where('a', '>=', 'a').orderBy('a').orderBy('b')     | a ASC
- * where('a', 'array-contains', 'a').orderBy('b')      | a CONTAINS, b ASCENDING
- * where('a', 'array-contains', 'a').orderBy('b')      | a CONTAINS
- */ class ar {
-    constructor(t) {
-        this.collectionId = null != t.collectionGroup ? t.collectionGroup : t.path.lastSegment(), 
-        this.Me = t.orderBy, this.Oe = [];
-        for (const e of t.filters) {
-            const t = e;
-            t.S() ? this.Fe = t : this.Oe.push(t);
-        }
-    }
-    /**
-     * Returns whether the index can be used to serve the TargetIndexMatcher's
-     * target.
-     *
-     * An index is considered capable of serving the target when:
-     * - The target uses all index segments for its filters and orderBy clauses.
-     *   The target can have additional filter and orderBy clauses, but not
-     *   fewer.
-     * - If an ArrayContains/ArrayContainsAnyfilter is used, the index must also
-     *   have a corresponding `CONTAINS` segment.
-     * - All directional index segments can be mapped to the target as a series of
-     *   equality filters, a single inequality filter and a series of orderBy
-     *   clauses.
-     * - The segments that represent the equality filters may appear out of order.
-     * - The optional segment for the inequality filter must appear after all
-     *   equality segments.
-     * - The segments that represent that orderBy clause of the target must appear
-     *   in order after all equality and inequality segments. Single orderBy
-     *   clauses cannot be skipped, but a continuous orderBy suffix may be
-     *   omitted.
-     */    $e(t) {
-        // If there is an array element, find a matching filter.
-        const e = ie(t);
-        if (void 0 !== e && !this.Be(e)) return !1;
-        const n = re(t);
-        let s = 0, i = 0;
-        // Process all equalities first. Equalities can appear out of order.
-        for (;s < n.length && this.Be(n[s]); ++s) ;
-        // If we already have processed all segments, all segments are used to serve
-        // the equality filters and we do not need to map any segments to the
-        // target's inequality and orderBy clauses.
-                if (s === n.length) return !0;
-        // If there is an inequality filter, the next segment must match both the
-        // filter and the first orderBy clause.
-                if (void 0 !== this.Fe) {
-            const t = n[s];
-            if (!this.Le(this.Fe, t) || !this.Ue(this.Me[i++], t)) return !1;
-            ++s;
-        }
-        // All remaining segments need to represent the prefix of the target's
-        // orderBy.
-                for (;s < n.length; ++s) {
-            const t = n[s];
-            if (i >= this.Me.length || !this.Ue(this.Me[i++], t)) return !1;
-        }
-        return !0;
-    }
-    Be(t) {
-        for (const e of this.Oe) if (this.Le(e, t)) return !0;
-        return !1;
-    }
-    Le(t, e) {
-        if (void 0 === t || !t.field.isEqual(e.fieldPath)) return !1;
-        const n = "array-contains" /* ARRAY_CONTAINS */ === t.op || "array-contains-any" /* ARRAY_CONTAINS_ANY */ === t.op;
-        return 2 /* CONTAINS */ === e.kind === n;
-    }
-    Ue(t, e) {
-        return !!t.field.isEqual(e.fieldPath) && (0 /* ASCENDING */ === e.kind && "asc" /* ASCENDING */ === t.dir || 1 /* DESCENDING */ === e.kind && "desc" /* DESCENDING */ === t.dir);
-    }
 }
 
 /**
@@ -10474,47 +10339,47 @@ function ur(t, e) {
  */
 /**
  * An in-memory implementation of IndexManager.
- */ class cr {
+ */ class Wi {
     constructor() {
-        this.qe = new hr;
+        this.xe = new zi;
     }
     addToCollectionParentIndex(t, e) {
-        return this.qe.add(e), pi.resolve();
+        return this.xe.add(e), si.resolve();
     }
     getCollectionParents(t, e) {
-        return pi.resolve(this.qe.getEntries(e));
+        return si.resolve(this.xe.getEntries(e));
     }
     addFieldIndex(t, e) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve();
+        return si.resolve();
     }
     deleteFieldIndex(t, e) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve();
+        return si.resolve();
     }
-    getDocumentsMatchingTarget(t, e) {
+    getDocumentsMatchingTarget(t, e, n) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve(null);
+        return si.resolve(On());
     }
     getFieldIndex(t, e) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve(null);
+        return si.resolve(null);
     }
     getFieldIndexes(t, e) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve([]);
+        return si.resolve([]);
     }
     getNextCollectionGroupToUpdate(t) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve(null);
+        return si.resolve(null);
     }
     updateCollectionGroup(t, e, n) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve();
+        return si.resolve();
     }
     updateIndexEntries(t, e) {
         // Field indices are not supported with memory persistence.
-        return pi.resolve();
+        return si.resolve();
     }
 }
 
@@ -10522,13 +10387,13 @@ function ur(t, e) {
  * Internal implementation of the collection-parent index exposed by MemoryIndexManager.
  * Also used for in-memory caching by IndexedDbIndexManager and initial index population
  * in indexeddb_schema.ts
- */ class hr {
+ */ class zi {
     constructor() {
         this.index = {};
     }
     // Returns false if the entry already existed.
     add(t) {
-        const e = t.lastSegment(), n = t.popLast(), s = this.index[e] || new qn(_t.comparator), i = !s.has(n);
+        const e = t.lastSegment(), n = t.popLast(), s = this.index[e] || new bn(_t.comparator), i = !s.has(n);
         return this.index[e] = s.add(n), i;
     }
     has(t) {
@@ -10536,7 +10401,7 @@ function ur(t, e) {
         return s && s.has(n);
     }
     getEntries(t) {
-        return (this.index[t] || new qn(_t.comparator)).toArray();
+        return (this.index[t] || new bn(_t.comparator)).toArray();
     }
 }
 
@@ -10555,17 +10420,16 @@ function ur(t, e) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const lr = new Uint8Array(0);
-
+ */
 /**
  * A persisted implementation of IndexManager.
  *
  * PORTING NOTE: Unlike iOS and Android, the Web SDK does not memoize index
  * data as it supports multi-tab access.
  */
-class fr {
-    constructor(t, e) {
-        this.user = t, this.databaseId = e, 
+class Hi {
+    constructor(t) {
+        this.user = t, 
         /**
          * An in-memory copy of the index entries we've already written since the SDK
          * launched. Used to avoid re-writing the same entry repeatedly.
@@ -10573,12 +10437,7 @@ class fr {
          * This is *NOT* a complete cache of what's in persistence and so can never be
          * used to satisfy reads.
          */
-        this.Ke = new hr, 
-        /**
-         * Maps from a target to its equivalent list of sub-targets. Each sub-target
-         * contains only one term from the target's disjunctive normal form (DNF).
-         */
-        this.Ge = new $n((t => _e(t)), ((t, e) => me(t, e))), this.uid = t.uid || "";
+        this.ke = new zi, this.uid = t.uid || "";
     }
     /**
      * Adds a new entry to the collection parent index.
@@ -10587,33 +10446,33 @@ class fr {
      * transaction as IndexedDbIndexManager only caches writes once a transaction
      * has been committed.
      */    addToCollectionParentIndex(t, e) {
-        if (!this.Ke.has(e)) {
+        if (!this.ke.has(e)) {
             const n = e.lastSegment(), s = e.popLast();
             t.addOnCommittedListener((() => {
                 // Add the collection to the in memory cache only if the transaction was
                 // successfully committed.
-                this.Ke.add(e);
+                this.ke.add(e);
             }));
             const i = {
                 collectionId: n,
-                parent: Qs(s)
+                parent: Vs(s)
             };
-            return dr(t).put(i);
+            return Ji(t).put(i);
         }
-        return pi.resolve();
+        return si.resolve();
     }
     getCollectionParents(t, e) {
-        const n = [], s = IDBKeyRange.bound([ e, "" ], [ ut(e), "" ], 
+        const n = [], s = IDBKeyRange.bound([ e, "" ], [ ct(e), "" ], 
         /*lowerOpen=*/ !1, 
         /*upperOpen=*/ !0);
-        return dr(t).qt(s).next((t => {
+        return Ji(t).qt(s).next((t => {
             for (const s of t) {
                 // This collectionId guard shouldn't be necessary (and isn't as long
                 // as we're running in a real browser), but there's a bug in
                 // indexeddbshim that breaks our range in our tests running in node:
                 // https://github.com/axemclion/IndexedDBShim/issues/334
                 if (s.collectionId !== e) break;
-                n.push(zs(s.parent));
+                n.push(Cs(s.parent));
             }
             return n;
         }));
@@ -10621,267 +10480,70 @@ class fr {
     addFieldIndex(t, e) {
         // TODO(indexing): Verify that the auto-incrementing index ID works in
         // Safari & Firefox.
-        const n = wr(t), s = function(t) {
-            return {
-                indexId: t.indexId,
-                collectionGroup: t.collectionGroup,
-                fields: t.fields.map((t => [ t.fieldPath.canonicalString(), t.kind ]))
-            };
+        const n = Xi(t), s = function(t) {
+            return new zs(t.indexId, t.collectionGroup, t.fields.map((t => [ t.fieldPath.canonicalString(), t.kind ])));
         }(e);
         // `indexId` is auto-populated by IndexedDb
         return delete s.indexId, n.add(s).next();
     }
     deleteFieldIndex(t, e) {
-        const n = wr(t), s = mr(t), i = _r(t);
+        const n = Xi(t), s = Zi(t), i = Yi(t);
         return n.delete(e.indexId).next((() => s.delete(IDBKeyRange.bound([ e.indexId ], [ e.indexId + 1 ], 
         /*lowerOpen=*/ !1, 
         /*upperOpen=*/ !0)))).next((() => i.delete(IDBKeyRange.bound([ e.indexId ], [ e.indexId + 1 ], 
         /*lowerOpen=*/ !1, 
         /*upperOpen=*/ !0))));
     }
-    getDocumentsMatchingTarget(t, e) {
-        const n = _r(t);
-        let s = !0;
-        const i = new Map;
-        return pi.forEach(this.Qe(e), (e => this.getFieldIndex(t, e).next((t => {
-            s && (s = !!t), i.set(e, t);
-        })))).next((() => {
-            if (s) {
-                let t = Xn();
-                const s = [];
-                return pi.forEach(i, ((i, r) => {
-                    /** Returns a debug representation of the field index */
-                    var o;
-                    O("IndexedDbIndexManager", `Using index ${o = i, `id=${o.indexId}|cg=${o.collectionGroup}|f=${o.fields.map((t => `${t.fieldPath}:${t.kind}`)).join(",")}`} to execute ${_e(e)}`);
-                    const u = function(t, e) {
-                        const n = ie(e);
-                        if (void 0 === n) return null;
-                        for (const e of ye(t, n.fieldPath)) switch (e.op) {
-                          case "array-contains-any" /* ARRAY_CONTAINS_ANY */ :
-                            return e.value.arrayValue.values || [];
-
-                          case "array-contains" /* ARRAY_CONTAINS */ :
-                            return [ e.value ];
-                            // Remaining filters are not array filters.
-                                                }
-                        return null;
-                    }
-                    /**
- * Returns the list of values that are used in != or NOT_IN filters. Returns
- * `null` if there are no such filters.
- */ (r, i), a = function(t, e) {
-                        const n = new Map;
-                        for (const s of re(e)) for (const e of ye(t, s.fieldPath)) switch (e.op) {
-                          case "==" /* EQUAL */ :
-                          case "in" /* IN */ :
-                            // Encode equality prefix, which is encoded in the index value before
-                            // the inequality (e.g. `a == 'a' && b != 'b'` is encoded to
-                            // `value != 'ab'`).
-                            n.set(s.fieldPath.canonicalString(), e.value);
-                            break;
-
-                          case "not-in" /* NOT_IN */ :
-                          case "!=" /* NOT_EQUAL */ :
-                            // NotIn/NotEqual is always a suffix. There cannot be any remaining
-                            // segments and hence we can return early here.
-                            return n.set(s.fieldPath.canonicalString(), e.value), Array.from(n.values());
-                            // Remaining filters cannot be used as notIn bounds.
-                                                }
-                        return null;
-                    }
-                    /**
- * Returns a lower bound of field values that can be used as a starting point to
- * scan the index defined by `fieldIndex`. Returns `null` if no lower bound
- * exists.
- */ (r, i), c = function(t, e) {
-                        const n = [];
-                        let s = !0;
-                        // For each segment, retrieve a lower bound if there is a suitable filter or
-                        // startAt.
-                                                for (const i of re(e)) {
-                            const e = 0 /* ASCENDING */ === i.kind ? pe(t, i.fieldPath, t.startAt) : Ie(t, i.fieldPath, t.startAt);
-                            if (!e.value) 
-                            // No lower bound exists
-                            return null;
-                            n.push(e.value), s && (s = e.inclusive);
-                        }
-                        return new De(n, s);
-                    }
-                    /**
- * Returns an upper bound of field values that can be used as an ending point
- * when scanning the index defined by `fieldIndex`. Returns `null` if no
- * upper bound exists.
- */ (r, i), h = function(t, e) {
-                        const n = [];
-                        let s = !0;
-                        // For each segment, retrieve an upper bound if there is a suitable filter or
-                        // endAt.
-                                                for (const i of re(e)) {
-                            const e = 0 /* ASCENDING */ === i.kind ? Ie(t, i.fieldPath, t.endAt) : pe(t, i.fieldPath, t.endAt);
-                            if (!e.value) 
-                            // No upper bound exists
-                            return null;
-                            n.push(e.value), s && (s = e.inclusive);
-                        }
-                        return new De(n, s);
-                    }(r, i), l = this.je(i, r, c), f = this.je(i, r, h), d = this.We(i, r, a), _ = this.ze(i.indexId, u, l, !!c && c.inclusive, f, !!h && h.inclusive, d);
-                    return pi.forEach(_, (i => n.Gt(i, e.limit).next((e => {
-                        e.forEach((e => {
-                            const n = xt.fromSegments(e.documentKey);
-                            t.has(n) || (t = t.add(n), s.push(n));
-                        }));
-                    }))));
-                })).next((() => s));
-            }
-            return pi.resolve(null);
-        }));
-    }
-    Qe(t) {
-        let e = this.Ge.get(t);
-        return e || (
-        // TODO(orquery): Implement DNF transform
-        e = [ t ], this.Ge.set(t, e), e);
-    }
-    /**
-     * Constructs a key range query on `DbIndexEntryStore` that unions all
-     * bounds.
-     */    ze(t, e, n, s, i, r, o) {
-        // The number of total index scans we union together. This is similar to a
-        // distributed normal form, but adapted for array values. We create a single
-        // index range per value in an ARRAY_CONTAINS or ARRAY_CONTAINS_ANY filter
-        // combined with the values from the query bounds.
-        const u = (null != e ? e.length : 1) * Math.max(null != n ? n.length : 1, null != i ? i.length : 1), a = u / (null != e ? e.length : 1), c = [];
-        for (let h = 0; h < u; ++h) {
-            const u = e ? this.He(e[h / a]) : lr, l = n ? this.Je(t, u, n[h % a], s) : this.Ye(t), f = i ? this.Xe(t, u, i[h % a], r) : this.Ye(t + 1);
-            c.push(...this.createRange(l, f, o.map((e => this.Je(t, u, e, 
-            /* inclusive= */ !0)))));
-        }
-        return c;
-    }
-    /** Generates the lower bound for `arrayValue` and `directionalValue`. */    Je(t, e, n, s) {
-        const i = new rr(t, xt.empty(), e, n);
-        return s ? i : i.ke();
-    }
-    /** Generates the upper bound for `arrayValue` and `directionalValue`. */    Xe(t, e, n, s) {
-        const i = new rr(t, xt.empty(), e, n);
-        return s ? i.ke() : i;
-    }
-    /**
-     * Generates an empty bound that scopes the index scan to the current index
-     * and user.
-     */    Ye(t) {
-        return new rr(t, xt.empty(), lr, lr);
+    getDocumentsMatchingTarget(t, e, n) {
+        // TODO(indexing): Implement
+        return si.resolve(On());
     }
     getFieldIndex(t, e) {
-        const n = new ar(e), s = null != e.collectionGroup ? e.collectionGroup : e.path.lastSegment();
-        return this.getFieldIndexes(t, s).next((t => {
-            const e = t.filter((t => n.$e(t)));
-            // Return the index that matches the most number of segments.
-                        return e.sort(((t, e) => e.fields.length - t.fields.length)), e.length > 0 ? e[0] : null;
-        }));
+        // TODO(indexing): Implement
+        return si.resolve(null);
     }
     /**
      * Returns the byte encoded form of the directional values in the field index.
      * Returns `null` if the document does not have all fields specified in the
      * index.
-     */    Ze(t, e) {
-        const n = new ir;
-        for (const s of re(t)) {
+     */    Oe(t, e) {
+        const n = new Ki;
+        for (const s of 
+        /** Returns all directional (ascending/descending) segments for this index. */
+        function(t) {
+            return t.fields.filter((t => 2 /* CONTAINS */ !== t.kind));
+        }(t)) {
             const t = e.data.field(s.fieldPath);
             if (null == t) return null;
             const i = n.Ne(s.kind);
-            Xi.fe.Zt(t, i);
+            $i.le.Xt(t, i);
         }
-        return n.Se();
+        return n.Ve();
     }
-    /** Encodes a single value to the ascending index format. */    He(t) {
-        const e = new ir;
-        return Xi.fe.Zt(t, e.Ne(0 /* ASCENDING */)), e.Se();
-    }
-    /**
-     * Returns an encoded form of the document key that sorts based on the key
-     * ordering of the field index.
-     */    tn(t, e) {
-        const n = new ir;
-        return Xi.fe.Zt(qt(this.databaseId, e), n.Ne(function(t) {
-            const e = re(t);
-            return 0 === e.length ? 0 /* ASCENDING */ : e[e.length - 1].kind;
-        }(t))), n.Se();
-    }
-    /**
-     * Encodes the given field values according to the specification in `target`.
-     * For IN queries, a list of possible values is returned.
-     */    We(t, e, n) {
-        if (null === n) return [];
-        let s = [];
-        s.push(new ir);
-        let i = 0;
-        for (const r of re(t)) {
-            const t = n[i++];
-            for (const n of s) if (this.en(e, r.fieldPath) && Gt(t)) s = this.nn(s, r, t); else {
-                const e = n.Ne(r.kind);
-                Xi.fe.Zt(t, e);
-            }
-        }
-        return this.sn(s);
-    }
-    /**
-     * Encodes the given bounds according to the specification in `target`. For IN
-     * queries, a list of possible values is returned.
-     */    je(t, e, n) {
-        return null == n ? null : this.We(t, e, n.position);
-    }
-    /** Returns the byte representation for the provided encoders. */    sn(t) {
-        const e = [];
-        for (let n = 0; n < t.length; ++n) e[n] = t[n].Se();
-        return e;
-    }
-    /**
-     * Creates a separate encoder for each element of an array.
-     *
-     * The method appends each value to all existing encoders (e.g. filter("a",
-     * "==", "a1").filter("b", "in", ["b1", "b2"]) becomes ["a1,b1", "a1,b2"]). A
-     * list of new encoders is returned.
-     */    nn(t, e, n) {
-        const s = [ ...t ], i = [];
-        for (const t of n.arrayValue.values || []) for (const n of s) {
-            const s = new ir;
-            s.seed(n.Se()), Xi.fe.Zt(t, s.Ne(e.kind)), i.push(s);
-        }
-        return i;
-    }
-    en(t, e) {
-        return !!t.filters.find((t => t instanceof Te && t.field.isEqual(e) && ("in" /* IN */ === t.op || "not-in" /* NOT_IN */ === t.op)));
+    /** Encodes a single value to the ascending index format. */    Me(t) {
+        const e = new Ki;
+        return $i.le.Xt(t, e.Ne(0 /* ASCENDING */)), e.Ve();
     }
     getFieldIndexes(t, e) {
-        const n = wr(t), s = mr(t);
-        return (e ? n.qt("collectionGroupIndex", IDBKeyRange.bound(e, e)) : n.qt()).next((t => {
+        const n = Xi(t), s = Zi(t);
+        return (e ? n.qt(zs.collectionGroupIndex, IDBKeyRange.bound(e, e)) : n.qt()).next((t => {
             const e = [];
-            return pi.forEach(t, (t => s.get([ t.indexId, this.uid ]).next((n => {
+            return si.forEach(t, (t => s.get([ t.indexId, this.uid ]).next((n => {
                 e.push(function(t, e) {
-                    const n = e ? new ue(e.sequenceNumber, new he(Li(e.readTime), new xt(zs(e.documentKey)), e.largestBatchId)) : ue.empty(), s = t.fields.map((([t, e]) => new oe(mt.fromServerFormat(t), e)));
-                    return new se(t.indexId, t.collectionGroup, s, n);
+                    const n = e ? new Zt(e.sequenceNumber, new te(Pi(e.readTime), new Nt(Cs(e.documentKey)), e.largestBatchId)) : Zt.empty(), s = t.fields.map((([t, e]) => new Xt(mt.fromServerFormat(t), e)));
+                    return new Yt(t.indexId, t.collectionGroup, s, n);
                 }(t, n));
             })))).next((() => e));
         }));
     }
     getNextCollectionGroupToUpdate(t) {
-        return this.getFieldIndexes(t).next((t => 0 === t.length ? null : (t.sort(((t, e) => {
-            const n = t.indexState.sequenceNumber - e.indexState.sequenceNumber;
-            return 0 !== n ? n : rt(t.collectionGroup, e.collectionGroup);
-        })), t[0].collectionGroup)));
+        return this.getFieldIndexes(t).next((t => 0 === t.length ? null : (t.sort(((t, e) => t.indexState.sequenceNumber - e.indexState.sequenceNumber)), 
+        t[0].collectionGroup)));
     }
     updateCollectionGroup(t, e, n) {
-        const s = wr(t), i = mr(t);
-        return this.rn(t).next((t => s.qt("collectionGroupIndex", IDBKeyRange.bound(e, e)).next((e => pi.forEach(e, (e => i.put(function(t, e, n, s) {
-            return {
-                indexId: t,
-                uid: e.uid || "",
-                sequenceNumber: n,
-                readTime: Bi(s.readTime),
-                documentKey: Qs(s.documentKey.path),
-                largestBatchId: s.largestBatchId
-            };
+        const s = Xi(t), i = Zi(t);
+        return this.$e(t).next((t => s.qt(zs.collectionGroupIndex, IDBKeyRange.bound(e, e)).next((e => si.forEach(e, (e => i.put(function(t, e, n, s) {
+            return new Hs(t, e.uid || "", n, Ri(s.readTime), Vs(s.documentKey.path), s.largestBatchId);
         }(e.indexId, this.user, t, n))))))));
     }
     updateIndexEntries(t, e) {
@@ -10891,65 +10553,62 @@ class fr {
         // data within a single IndexedDB transaction. We therefore add a cache
         // here.
         const n = new Map;
-        return pi.forEach(e, ((e, s) => {
+        return si.forEach(e, ((e, s) => {
             const i = n.get(e.collectionGroup);
-            return (i ? pi.resolve(i) : this.getFieldIndexes(t, e.collectionGroup)).next((i => (n.set(e.collectionGroup, i), 
-            pi.forEach(i, (n => this.on(t, e, n).next((e => {
-                const i = this.un(s, n);
-                return e.isEqual(i) ? pi.resolve() : this.an(t, s, n, e, i);
+            return (i ? si.resolve(i) : this.getFieldIndexes(t, e.collectionGroup)).next((i => (n.set(e.collectionGroup, i), 
+            si.forEach(i, (n => this.Fe(t, e, n).next((e => {
+                const i = this.Be(s, n);
+                return e.isEqual(i) ? si.resolve() : this.Le(t, s, e, i);
             })))))));
         }));
     }
-    cn(t, e, n, s) {
-        return _r(t).put({
-            indexId: s.indexId,
-            uid: this.uid,
-            arrayValue: s.arrayValue,
-            directionalValue: s.directionalValue,
-            orderedDocumentKey: this.tn(n, e.key),
-            documentKey: e.key.path.toArray()
-        });
+    Ue(t, e, n) {
+        return Yi(t).put(new Js(n.indexId, this.uid, n.arrayValue, n.directionalValue, Vs(e.key.path)));
     }
-    hn(t, e, n, s) {
-        return _r(t).delete([ s.indexId, this.uid, s.arrayValue, s.directionalValue, this.tn(n, e.key), e.key.path.toArray() ]);
+    qe(t, e, n) {
+        return Yi(t).delete([ n.indexId, this.uid, n.arrayValue, n.directionalValue, Vs(e.key.path) ]);
     }
-    on(t, e, n) {
-        const s = _r(t);
-        let i = new qn(or);
-        return s.Wt({
-            index: "documentKeyIndex",
-            range: IDBKeyRange.only([ n.indexId, this.uid, this.tn(n, e) ])
+    Fe(t, e, n) {
+        const s = Yi(t);
+        let i = new bn(ji);
+        return s.Qt({
+            index: Js.documentKeyIndex,
+            range: IDBKeyRange.only([ n.indexId, this.uid, Vs(e.path) ])
         }, ((t, s) => {
-            i = i.add(new rr(n.indexId, e, s.arrayValue, s.directionalValue));
+            i = i.add(new Gi(n.indexId, e, s.arrayValue, s.directionalValue));
         })).next((() => i));
     }
-    /** Creates the index entries for the given document. */    un(t, e) {
-        let n = new qn(or);
-        const s = this.Ze(e, t);
+    /** Creates the index entries for the given document. */    Be(t, e) {
+        let n = new bn(ji);
+        const s = this.Oe(e, t);
         if (null == s) return n;
-        const i = ie(e);
+        const i = 
+        /** Returns the ArrayContains/ArrayContainsAny segment for this index. */
+        function(t) {
+            return t.fields.find((t => 2 /* CONTAINS */ === t.kind));
+        }(e);
         if (null != i) {
             const r = t.data.field(i.fieldPath);
-            if (Gt(r)) for (const i of r.arrayValue.values || []) n = n.add(new rr(e.indexId, t.key, this.He(i), s));
-        } else n = n.add(new rr(e.indexId, t.key, lr, s));
+            if (Kt(r)) for (const i of r.arrayValue.values || []) n = n.add(new Gi(e.indexId, t.key, this.Me(i), s));
+        } else n = n.add(new Gi(e.indexId, t.key, new Uint8Array, s));
         return n;
     }
     /**
      * Updates the index entries for the provided document by deleting entries
      * that are no longer referenced in `newEntries` and adding all newly added
      * entries.
-     */    an(t, e, n, s, i) {
-        O("IndexedDbIndexManager", "Updating index entries for document '%s'", e.key);
-        const r = [];
+     */    Le(t, e, n, s) {
+        M("IndexedDbIndexManager", "Updating index entries for document '%s'", e.key);
+        const i = [];
         return function(t, e, n, s, i) {
             const r = t.getIterator(), o = e.getIterator();
-            let u = Gn(r), a = Gn(o);
+            let c = Vn(r), u = Vn(o);
             // Walk through the two sets at the same time, using the ordering defined by
             // `comparator`.
-            for (;u || a; ) {
+            for (;c || u; ) {
                 let t = !1, e = !1;
-                if (u && a) {
-                    const s = n(u, a);
+                if (c && u) {
+                    const s = n(c, u);
                     s < 0 ? 
                     // The element was removed if the next element in our ordered
                     // walkthrough is only in `before`.
@@ -10957,78 +10616,52 @@ class fr {
                     // The element was added if the next element in our ordered walkthrough
                     // is only in `after`.
                     t = !0);
-                } else null != u ? e = !0 : t = !0;
-                t ? (s(a), a = Gn(o)) : e ? (i(u), u = Gn(r)) : (u = Gn(r), a = Gn(o));
+                } else null != c ? e = !0 : t = !0;
+                t ? (s(u), u = Vn(o)) : e ? (i(c), c = Vn(r)) : (c = Vn(r), u = Vn(o));
             }
-        }(s, i, or, (
-        /* onAdd= */ s => {
-            r.push(this.cn(t, e, n, s));
+        }(n, s, ji, (
+        /* onAdd= */ n => {
+            i.push(this.Ue(t, e, n));
         }), (
-        /* onRemove= */ s => {
-            r.push(this.hn(t, e, n, s));
-        })), pi.waitFor(r);
+        /* onRemove= */ n => {
+            i.push(this.qe(t, e, n));
+        })), si.waitFor(i);
     }
-    rn(t) {
+    $e(t) {
         let e = 1;
-        return mr(t).Wt({
-            index: "sequenceNumberIndex",
+        return Zi(t).Qt({
+            index: Hs.sequenceNumberIndex,
             reverse: !0,
             range: IDBKeyRange.upperBound([ this.uid, Number.MAX_SAFE_INTEGER ])
         }, ((t, n, s) => {
             s.done(), e = n.sequenceNumber + 1;
         })).next((() => e));
     }
-    /**
-     * Returns a new set of IDB ranges that splits the existing range and excludes
-     * any values that match the `notInValue` from these ranges. As an example,
-     * '[foo > 2 && foo != 3]` becomes  `[foo > 2 && < 3, foo > 3]`.
-     */    createRange(t, e, n) {
-        // The notIb values need to be sorted and unique so that we can return a
-        // sorted set of non-overlapping ranges.
-        n = n.sort(((t, e) => or(t, e))).filter(((t, e, n) => !e || 0 !== or(t, n[e - 1])));
-        const s = [];
-        s.push(t);
-        for (const i of n) {
-            const n = or(i, t), r = or(i, e);
-            if (0 === n) 
-            // `notInValue` is the lower bound. We therefore need to raise the bound
-            // to the next value.
-            s[0] = t.ke(); else if (n > 0 && r < 0) 
-            // `notInValue` is in the middle of the range
-            s.push(i), s.push(i.ke()); else if (r > 0) 
-            // `notInValue` (and all following values) are out of the range
-            break;
-        }
-        s.push(e);
-        const i = [];
-        for (let t = 0; t < s.length; t += 2) i.push(IDBKeyRange.bound([ s[t].indexId, this.uid, s[t].arrayValue, s[t].directionalValue, lr, [] ], [ s[t + 1].indexId, this.uid, s[t + 1].arrayValue, s[t + 1].directionalValue, lr, [] ]));
-        return i;
-    }
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the collectionParents
  * document store.
- */ function dr(t) {
-    return Di(t, "collectionParents");
+ */ function Ji(t) {
+    return _i(t, Gs.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the index entry object store.
- */ function _r(t) {
-    return Di(t, "indexEntries");
+ */ function Yi(t) {
+    return _i(t, Js.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the index configuration object store.
- */ function wr(t) {
-    return Di(t, "indexConfiguration");
+ */ function Xi(t) {
+    return _i(t, zs.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the index state object store.
- */ function mr(t) {
-    return Di(t, "indexState");
+ */ function Zi(t) {
+    return _i(t, Hs.store);
 }
 
 /**
@@ -11046,14 +10679,14 @@ class fr {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const gr = {
+ */ const tr = {
     didRun: !1,
     sequenceNumbersCollected: 0,
     targetsRemoved: 0,
     documentsRemoved: 0
 };
 
-class yr {
+class er {
     constructor(
     // When we attempt to collect, we will only do so if the cache size is greater than this
     // threshold. Passing `COLLECTION_DISABLED` here will cause collection to always be skipped.
@@ -11066,7 +10699,7 @@ class yr {
         this.cacheSizeCollectionThreshold = t, this.percentileToCollect = e, this.maximumSequenceNumbersToCollect = n;
     }
     static withCacheSize(t) {
-        return new yr(t, yr.DEFAULT_COLLECTION_PERCENTILE, yr.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT);
+        return new er(t, er.DEFAULT_COLLECTION_PERCENTILE, er.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT);
     }
 }
 
@@ -11090,26 +10723,26 @@ class yr {
  * Delete a mutation batch and the associated document mutations.
  * @returns A PersistencePromise of the document mutations that were removed.
  */
-function pr(t, e, n) {
-    const s = t.store("mutations"), i = t.store("documentMutations"), r = [], o = IDBKeyRange.only(n.batchId);
-    let u = 0;
-    const a = s.Wt({
+function nr(t, e, n) {
+    const s = t.store(Os.store), i = t.store(Ms.store), r = [], o = IDBKeyRange.only(n.batchId);
+    let c = 0;
+    const u = s.Qt({
         range: o
-    }, ((t, e, n) => (u++, n.delete())));
-    r.push(a.next((() => {
-        U(1 === u);
+    }, ((t, e, n) => (c++, n.delete())));
+    r.push(u.next((() => {
+        U(1 === c);
     })));
-    const c = [];
+    const a = [];
     for (const t of n.mutations) {
-        const s = Ys(e, t.key.path, n.batchId);
-        r.push(i.delete(s)), c.push(t.key);
+        const s = Ms.key(e, t.key.path, n.batchId);
+        r.push(i.delete(s)), a.push(t.key);
     }
-    return pi.waitFor(r).next((() => c));
+    return si.waitFor(r).next((() => a));
 }
 
 /**
  * Returns an approximate size for the given document.
- */ function Ir(t) {
+ */ function sr(t) {
     if (!t) return 0;
     let e;
     if (t.document) e = t.document; else if (t.unknownDocument) e = t.unknownDocument; else {
@@ -11135,18 +10768,18 @@ function pr(t, e, n) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** A mutation queue for a specific user, backed by IndexedDB. */ yr.DEFAULT_COLLECTION_PERCENTILE = 10, 
-yr.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT = 1e3, yr.DEFAULT = new yr(41943040, yr.DEFAULT_COLLECTION_PERCENTILE, yr.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT), 
-yr.DISABLED = new yr(-1, 0, 0);
+/** A mutation queue for a specific user, backed by IndexedDB. */ er.DEFAULT_COLLECTION_PERCENTILE = 10, 
+er.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT = 1e3, er.DEFAULT = new er(41943040, er.DEFAULT_COLLECTION_PERCENTILE, er.DEFAULT_MAX_SEQUENCE_NUMBERS_TO_COLLECT), 
+er.DISABLED = new er(-1, 0, 0);
 
-class Tr {
+class ir {
     constructor(
     /**
      * The normalized userId (e.g. null UID => "" userId) used to store /
      * retrieve mutations.
      */
     t, e, n, s) {
-        this.userId = t, this.M = e, this.indexManager = n, this.referenceDelegate = s, 
+        this.userId = t, this.O = e, this.indexManager = n, this.referenceDelegate = s, 
         /**
          * Caches the document keys for pending mutation batches. If the mutation
          * has been removed from IndexedDb, the cached value may continue to
@@ -11159,33 +10792,33 @@ class Tr {
          * view of the documents that were previously affected by the mutation.
          */
         // PORTING NOTE: Multi-tab only.
-        this.ln = {};
+        this.Ke = {};
     }
     /**
      * Creates a new mutation queue for the given user.
      * @param user - The user for which to create a mutation queue.
      * @param serializer - The serializer to use when persisting to IndexedDb.
-     */    static Yt(t, e, n, s) {
+     */    static Jt(t, e, n, s) {
         // TODO(mcg): Figure out what constraints there are on userIDs
         // In particular, are there any reserved characters? are empty ids allowed?
         // For the moment store these together in the same mutations table assuming
         // that empty userIDs aren't allowed.
         U("" !== t.uid);
         const i = t.isAuthenticated() ? t.uid : "";
-        return new Tr(i, e, n, s);
+        return new ir(i, e, n, s);
     }
     checkEmpty(t) {
         let e = !0;
         const n = IDBKeyRange.bound([ this.userId, Number.NEGATIVE_INFINITY ], [ this.userId, Number.POSITIVE_INFINITY ]);
-        return Ar(t).Wt({
-            index: "userMutationsIndex",
+        return or(t).Qt({
+            index: Os.userMutationsIndex,
             range: n
         }, ((t, n, s) => {
             e = !1, s.done();
         })).next((() => e));
     }
     addMutationBatch(t, e, n, s) {
-        const i = Rr(t), r = Ar(t);
+        const i = cr(t), r = or(t);
         // The IndexedDb implementation in Chrome (and Firefox) does not handle
         // compound indices that include auto-generated keys correctly. To ensure
         // that the index entry is added correctly in all browsers, we perform two
@@ -11197,30 +10830,24 @@ class Tr {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         return r.add({}).next((o => {
             U("number" == typeof o);
-            const u = new Ci(o, e, n, s), a = function(t, e, n) {
-                const s = n.baseMutations.map((e => Ss(t.Jt, e))), i = n.mutations.map((e => Ss(t.Jt, e)));
-                return {
-                    userId: e,
-                    batchId: n.batchId,
-                    localWriteTimeMs: n.localWriteTime.toMillis(),
-                    baseMutations: s,
-                    mutations: i
-                };
-            }(this.M, this.userId, u), c = [];
-            let h = new qn(((t, e) => rt(t.canonicalString(), e.canonicalString())));
+            const c = new wi(o, e, n, s), u = function(t, e, n) {
+                const s = n.baseMutations.map((e => fs(t.Ht, e))), i = n.mutations.map((e => fs(t.Ht, e)));
+                return new Os(e, n.batchId, n.localWriteTime.toMillis(), s, i);
+            }(this.O, this.userId, c), a = [];
+            let h = new bn(((t, e) => rt(t.canonicalString(), e.canonicalString())));
             for (const t of s) {
-                const e = Ys(this.userId, t.key.path, o);
-                h = h.add(t.key.path.popLast()), c.push(r.put(a)), c.push(i.put(e, Xs));
+                const e = Ms.key(this.userId, t.key.path, o);
+                h = h.add(t.key.path.popLast()), a.push(r.put(u)), a.push(i.put(e, Ms.PLACEHOLDER));
             }
             return h.forEach((e => {
-                c.push(this.indexManager.addToCollectionParentIndex(t, e));
+                a.push(this.indexManager.addToCollectionParentIndex(t, e));
             })), t.addOnCommittedListener((() => {
-                this.ln[o] = u.keys();
-            })), pi.waitFor(c).next((() => u));
+                this.Ke[o] = c.keys();
+            })), si.waitFor(a).next((() => c));
         }));
     }
     lookupMutationBatch(t, e) {
-        return Ar(t).get(e).next((t => t ? (U(t.userId === this.userId), Ui(this.M, t)) : null));
+        return or(t).get(e).next((t => t ? (U(t.userId === this.userId), bi(this.O, t)) : null));
     }
     /**
      * Returns the document keys for the mutation batch with the given batchId.
@@ -11229,11 +10856,11 @@ class Tr {
      * cached result until `removeCachedMutationKeys()` is invoked.
      */
     // PORTING NOTE: Multi-tab only.
-    fn(t, e) {
-        return this.ln[e] ? pi.resolve(this.ln[e]) : this.lookupMutationBatch(t, e).next((t => {
+    Ge(t, e) {
+        return this.Ke[e] ? si.resolve(this.Ke[e]) : this.lookupMutationBatch(t, e).next((t => {
             if (t) {
                 const n = t.keys();
-                return this.ln[e] = n, n;
+                return this.Ke[e] = n, n;
             }
             return null;
         }));
@@ -11241,18 +10868,18 @@ class Tr {
     getNextMutationBatchAfterBatchId(t, e) {
         const n = e + 1, s = IDBKeyRange.lowerBound([ this.userId, n ]);
         let i = null;
-        return Ar(t).Wt({
-            index: "userMutationsIndex",
+        return or(t).Qt({
+            index: Os.userMutationsIndex,
             range: s
         }, ((t, e, s) => {
-            e.userId === this.userId && (U(e.batchId >= n), i = Ui(this.M, e)), s.done();
+            e.userId === this.userId && (U(e.batchId >= n), i = bi(this.O, e)), s.done();
         })).next((() => i));
     }
     getHighestUnacknowledgedBatchId(t) {
         const e = IDBKeyRange.upperBound([ this.userId, Number.POSITIVE_INFINITY ]);
         let n = -1;
-        return Ar(t).Wt({
-            index: "userMutationsIndex",
+        return or(t).Qt({
+            index: Os.userMutationsIndex,
             range: e,
             reverse: !0
         }, ((t, e, s) => {
@@ -11261,16 +10888,16 @@ class Tr {
     }
     getAllMutationBatches(t) {
         const e = IDBKeyRange.bound([ this.userId, -1 ], [ this.userId, Number.POSITIVE_INFINITY ]);
-        return Ar(t).qt("userMutationsIndex", e).next((t => t.map((t => Ui(this.M, t)))));
+        return or(t).qt(Os.userMutationsIndex, e).next((t => t.map((t => bi(this.O, t)))));
     }
     getAllMutationBatchesAffectingDocumentKey(t, e) {
         // Scan the document-mutation index starting with a prefix starting with
         // the given documentKey.
-        const n = Js(this.userId, e.path), s = IDBKeyRange.lowerBound(n), i = [];
-        return Rr(t).Wt({
+        const n = Ms.prefixForPath(this.userId, e.path), s = IDBKeyRange.lowerBound(n), i = [];
+        return cr(t).Qt({
             range: s
         }, ((n, s, r) => {
-            const [o, u, a] = n, c = zs(u);
+            const [o, c, u] = n, a = Cs(c);
             // Only consider rows matching exactly the specific key of
             // interest. Note that because we order by path first, and we
             // order terminators before path separators, we'll encounter all
@@ -11278,23 +10905,23 @@ class Tr {
             // the rows for documentKey will occur before any rows for
             // documents nested in a subcollection beneath documentKey so we
             // can stop as soon as we hit any such row.
-                        if (o === this.userId && e.path.isEqual(c)) 
+                        if (o === this.userId && e.path.isEqual(a)) 
             // Look up the mutation batch in the store.
-            return Ar(t).get(a).next((t => {
+            return or(t).get(u).next((t => {
                 if (!t) throw L();
-                U(t.userId === this.userId), i.push(Ui(this.M, t));
+                U(t.userId === this.userId), i.push(bi(this.O, t));
             }));
             r.done();
         })).next((() => i));
     }
     getAllMutationBatchesAffectingDocumentKeys(t, e) {
-        let n = new qn(rt);
+        let n = new bn(rt);
         const s = [];
         return e.forEach((e => {
-            const i = Js(this.userId, e.path), r = IDBKeyRange.lowerBound(i), o = Rr(t).Wt({
+            const i = Ms.prefixForPath(this.userId, e.path), r = IDBKeyRange.lowerBound(i), o = cr(t).Qt({
                 range: r
             }, ((t, s, i) => {
-                const [r, o, u] = t, a = zs(o);
+                const [r, o, c] = t, u = Cs(o);
                 // Only consider rows matching exactly the specific key of
                 // interest. Note that because we order by path first, and we
                 // order terminators before path separators, we'll encounter all
@@ -11302,44 +10929,44 @@ class Tr {
                 // the rows for documentKey will occur before any rows for
                 // documents nested in a subcollection beneath documentKey so we
                 // can stop as soon as we hit any such row.
-                                r === this.userId && e.path.isEqual(a) ? n = n.add(u) : i.done();
+                                r === this.userId && e.path.isEqual(u) ? n = n.add(c) : i.done();
             }));
             s.push(o);
-        })), pi.waitFor(s).next((() => this.dn(t, n)));
+        })), si.waitFor(s).next((() => this.je(t, n)));
     }
     getAllMutationBatchesAffectingQuery(t, e) {
-        const n = e.path, s = n.length + 1, i = Js(this.userId, n), r = IDBKeyRange.lowerBound(i);
+        const n = e.path, s = n.length + 1, i = Ms.prefixForPath(this.userId, n), r = IDBKeyRange.lowerBound(i);
         // Collect up unique batchIDs encountered during a scan of the index. Use a
         // SortedSet to accumulate batch IDs so they can be traversed in order in a
         // scan of the main table.
-        let o = new qn(rt);
-        return Rr(t).Wt({
+        let o = new bn(rt);
+        return cr(t).Qt({
             range: r
         }, ((t, e, i) => {
-            const [r, u, a] = t, c = zs(u);
-            r === this.userId && n.isPrefixOf(c) ? 
+            const [r, c, u] = t, a = Cs(c);
+            r === this.userId && n.isPrefixOf(a) ? 
             // Rows with document keys more than one segment longer than the
             // query path can't be matches. For example, a query on 'rooms'
             // can't match the document /rooms/abc/messages/xyx.
             // TODO(mcg): we'll need a different scanner when we implement
             // ancestor queries.
-            c.length === s && (o = o.add(a)) : i.done();
-        })).next((() => this.dn(t, o)));
+            a.length === s && (o = o.add(u)) : i.done();
+        })).next((() => this.je(t, o)));
     }
-    dn(t, e) {
+    je(t, e) {
         const n = [], s = [];
         // TODO(rockwood): Implement this using iterate.
         return e.forEach((e => {
-            s.push(Ar(t).get(e).next((t => {
+            s.push(or(t).get(e).next((t => {
                 if (null === t) throw L();
-                U(t.userId === this.userId), n.push(Ui(this.M, t));
+                U(t.userId === this.userId), n.push(bi(this.O, t));
             })));
-        })), pi.waitFor(s).next((() => n));
+        })), si.waitFor(s).next((() => n));
     }
     removeMutationBatch(t, e) {
-        return pr(t.Ht, this.userId, e).next((n => (t.addOnCommittedListener((() => {
-            this._n(e.batchId);
-        })), pi.forEach(n, (e => this.referenceDelegate.markPotentiallyOrphaned(t, e))))));
+        return nr(t.zt, this.userId, e).next((n => (t.addOnCommittedListener((() => {
+            this.Qe(e.batchId);
+        })), si.forEach(n, (e => this.referenceDelegate.markPotentiallyOrphaned(t, e))))));
     }
     /**
      * Clears the cached keys for a mutation batch. This method should be
@@ -11350,21 +10977,20 @@ class Tr {
      * rejected batch is removed from the mutation queue.
      */
     // PORTING NOTE: Multi-tab only
-    _n(t) {
-        delete this.ln[t];
+    Qe(t) {
+        delete this.Ke[t];
     }
     performConsistencyCheck(t) {
         return this.checkEmpty(t).next((e => {
-            if (!e) return pi.resolve();
+            if (!e) return si.resolve();
             // Verify that there are no entries in the documentMutations index if
             // the queue is empty.
-                        const n = IDBKeyRange.lowerBound([ this.userId ]);
-            const s = [];
-            return Rr(t).Wt({
+                        const n = IDBKeyRange.lowerBound(Ms.prefixForUser(this.userId)), s = [];
+            return cr(t).Qt({
                 range: n
             }, ((t, e, n) => {
                 if (t[0] === this.userId) {
-                    const e = zs(t[1]);
+                    const e = Cs(t[1]);
                     s.push(e);
                 } else n.done();
             })).next((() => {
@@ -11373,31 +10999,28 @@ class Tr {
         }));
     }
     containsKey(t, e) {
-        return Er(t, this.userId, e);
+        return rr(t, this.userId, e);
     }
     // PORTING NOTE: Multi-tab only (state is held in memory in other clients).
     /** Returns the mutation queue's metadata from IndexedDb. */
-    wn(t) {
-        return Pr(t).get(this.userId).next((t => t || {
-            userId: this.userId,
-            lastAcknowledgedBatchId: -1,
-            lastStreamToken: ""
-        }));
+    We(t) {
+        return ur(t).get(this.userId).next((t => t || new ks(this.userId, -1, 
+        /*lastStreamToken=*/ "")));
     }
 }
 
 /**
  * @returns true if the mutation queue for the given user contains a pending
  *         mutation for the given key.
- */ function Er(t, e, n) {
-    const s = Js(e, n.path), i = s[1], r = IDBKeyRange.lowerBound(s);
+ */ function rr(t, e, n) {
+    const s = Ms.prefixForPath(e, n.path), i = s[1], r = IDBKeyRange.lowerBound(s);
     let o = !1;
-    return Rr(t).Wt({
+    return cr(t).Qt({
         range: r,
         jt: !0
     }, ((t, n, s) => {
-        const [r, u, /*batchID*/ a] = t;
-        r === e && u === i && (o = !0), s.done();
+        const [r, c, /*batchID*/ u] = t;
+        r === e && c === i && (o = !0), s.done();
     })).next((() => o));
 }
 
@@ -11405,20 +11028,20 @@ class Tr {
 /**
  * Helper to get a typed SimpleDbStore for the mutations object store.
  */
-function Ar(t) {
-    return Di(t, "mutations");
+function or(t) {
+    return _i(t, Os.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the mutationQueues object store.
- */ function Rr(t) {
-    return Di(t, "documentMutations");
+ */ function cr(t) {
+    return _i(t, Ms.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the mutationQueues object store.
- */ function Pr(t) {
-    return Di(t, "mutationQueues");
+ */ function ur(t) {
+    return _i(t, ks.store);
 }
 
 /**
@@ -11452,23 +11075,23 @@ function Ar(t) {
  * generate in-memory target IDs that are transient and can be reused after a
  * restart.
  */
-class br {
+class ar {
     constructor(t) {
-        this.mn = t;
+        this.ze = t;
     }
     next() {
-        return this.mn += 2, this.mn;
+        return this.ze += 2, this.ze;
     }
-    static gn() {
+    static He() {
         // The target cache generator must return '2' in its first call to `next()`
         // as there is no differentiation in the protocol layer between an unset
         // number and the number '0'. If we were to sent a target with target ID
         // '0', the backend would consider it unset and replace it with its own ID.
-        return new br(0);
+        return new ar(0);
     }
-    static yn() {
+    static Je() {
         // Sync engine assigns target IDs for limbo document detection.
-        return new br(-1);
+        return new ar(-1);
     }
 }
 
@@ -11487,9 +11110,9 @@ class br {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Vr {
+ */ class hr {
     constructor(t, e) {
-        this.referenceDelegate = t, this.M = e;
+        this.referenceDelegate = t, this.O = e;
     }
     // PORTING NOTE: We don't cache global metadata for the target cache, since
     // some of it (in particular `highestTargetId`) can be modified by secondary
@@ -11498,31 +11121,31 @@ class br {
     // to IndexedDb whenever we need to read metadata. We can revisit if it turns
     // out to have a meaningful performance impact.
     allocateTargetId(t) {
-        return this.pn(t).next((e => {
-            const n = new br(e.highestTargetId);
-            return e.highestTargetId = n.next(), this.In(t, e).next((() => e.highestTargetId));
+        return this.Ye(t).next((e => {
+            const n = new ar(e.highestTargetId);
+            return e.highestTargetId = n.next(), this.Xe(t, e).next((() => e.highestTargetId));
         }));
     }
     getLastRemoteSnapshotVersion(t) {
-        return this.pn(t).next((t => ct.fromTimestamp(new at(t.lastRemoteSnapshotVersion.seconds, t.lastRemoteSnapshotVersion.nanoseconds))));
+        return this.Ye(t).next((t => at.fromTimestamp(new ut(t.lastRemoteSnapshotVersion.seconds, t.lastRemoteSnapshotVersion.nanoseconds))));
     }
     getHighestSequenceNumber(t) {
-        return this.pn(t).next((t => t.highestListenSequenceNumber));
+        return this.Ye(t).next((t => t.highestListenSequenceNumber));
     }
     setTargetsMetadata(t, e, n) {
-        return this.pn(t).next((s => (s.highestListenSequenceNumber = e, n && (s.lastRemoteSnapshotVersion = n.toTimestamp()), 
-        e > s.highestListenSequenceNumber && (s.highestListenSequenceNumber = e), this.In(t, s))));
+        return this.Ye(t).next((s => (s.highestListenSequenceNumber = e, n && (s.lastRemoteSnapshotVersion = n.toTimestamp()), 
+        e > s.highestListenSequenceNumber && (s.highestListenSequenceNumber = e), this.Xe(t, s))));
     }
     addTargetData(t, e) {
-        return this.Tn(t, e).next((() => this.pn(t).next((n => (n.targetCount += 1, this.En(e, n), 
-        this.In(t, n))))));
+        return this.Ze(t, e).next((() => this.Ye(t).next((n => (n.targetCount += 1, this.tn(e, n), 
+        this.Xe(t, n))))));
     }
     updateTargetData(t, e) {
-        return this.Tn(t, e);
+        return this.Ze(t, e);
     }
     removeTargetData(t, e) {
-        return this.removeMatchingKeysForTargetId(t, e.targetId).next((() => vr(t).delete(e.targetId))).next((() => this.pn(t))).next((e => (U(e.targetCount > 0), 
-        e.targetCount -= 1, this.In(t, e))));
+        return this.removeMatchingKeysForTargetId(t, e.targetId).next((() => lr(t).delete(e.targetId))).next((() => this.Ye(t))).next((e => (U(e.targetCount > 0), 
+        e.targetCount -= 1, this.Xe(t, e))));
     }
     /**
      * Drops any targets with sequence number less than or equal to the upper bound, excepting those
@@ -11531,80 +11154,77 @@ class br {
      */    removeTargets(t, e, n) {
         let s = 0;
         const i = [];
-        return vr(t).Wt(((r, o) => {
-            const u = qi(o);
-            u.sequenceNumber <= e && null === n.get(u.targetId) && (s++, i.push(this.removeTargetData(t, u)));
-        })).next((() => pi.waitFor(i))).next((() => s));
+        return lr(t).Qt(((r, o) => {
+            const c = vi(o);
+            c.sequenceNumber <= e && null === n.get(c.targetId) && (s++, i.push(this.removeTargetData(t, c)));
+        })).next((() => si.waitFor(i))).next((() => s));
     }
     /**
      * Call provided function with each `TargetData` that we have cached.
      */    forEachTarget(t, e) {
-        return vr(t).Wt(((t, n) => {
-            const s = qi(n);
+        return lr(t).Qt(((t, n) => {
+            const s = vi(n);
             e(s);
         }));
     }
-    pn(t) {
-        return Sr(t).get("targetGlobalKey").next((t => (U(null !== t), t)));
+    Ye(t) {
+        return fr(t).get(Ks.key).next((t => (U(null !== t), t)));
     }
-    In(t, e) {
-        return Sr(t).put("targetGlobalKey", e);
+    Xe(t, e) {
+        return fr(t).put(Ks.key, e);
     }
-    Tn(t, e) {
-        return vr(t).put(Ki(this.M, e));
+    Ze(t, e) {
+        return lr(t).put(Vi(this.O, e));
     }
     /**
      * In-place updates the provided metadata to account for values in the given
      * TargetData. Saving is done separately. Returns true if there were any
      * changes to the metadata.
-     */    En(t, e) {
+     */    tn(t, e) {
         let n = !1;
         return t.targetId > e.highestTargetId && (e.highestTargetId = t.targetId, n = !0), 
         t.sequenceNumber > e.highestListenSequenceNumber && (e.highestListenSequenceNumber = t.sequenceNumber, 
         n = !0), n;
     }
     getTargetCount(t) {
-        return this.pn(t).next((t => t.targetCount));
+        return this.Ye(t).next((t => t.targetCount));
     }
     getTargetData(t, e) {
         // Iterating by the canonicalId may yield more than one result because
         // canonicalId values are not required to be unique per target. This query
         // depends on the queryTargets index to be efficient.
-        const n = _e(e), s = IDBKeyRange.bound([ n, Number.NEGATIVE_INFINITY ], [ n, Number.POSITIVE_INFINITY ]);
+        const n = se(e), s = IDBKeyRange.bound([ n, Number.NEGATIVE_INFINITY ], [ n, Number.POSITIVE_INFINITY ]);
         let i = null;
-        return vr(t).Wt({
+        return lr(t).Qt({
             range: s,
-            index: "queryTargetsIndex"
+            index: Us.queryTargetsIndexName
         }, ((t, n, s) => {
-            const r = qi(n);
+            const r = vi(n);
             // After finding a potential match, check that the target is
             // actually equal to the requested target.
-                        me(e, r.target) && (i = r, s.done());
+                        re(e, r.target) && (i = r, s.done());
         })).next((() => i));
     }
     addMatchingKeys(t, e, n) {
         // PORTING NOTE: The reverse index (documentsTargets) is maintained by
         // IndexedDb.
-        const s = [], i = Dr(t);
+        const s = [], i = dr(t);
         return e.forEach((e => {
-            const r = Qs(e.path);
-            s.push(i.put({
-                targetId: n,
-                path: r
-            })), s.push(this.referenceDelegate.addReference(t, n, e));
-        })), pi.waitFor(s);
+            const r = Vs(e.path);
+            s.push(i.put(new qs(n, r))), s.push(this.referenceDelegate.addReference(t, n, e));
+        })), si.waitFor(s);
     }
     removeMatchingKeys(t, e, n) {
         // PORTING NOTE: The reverse index (documentsTargets) is maintained by
         // IndexedDb.
-        const s = Dr(t);
-        return pi.forEach(e, (e => {
-            const i = Qs(e.path);
-            return pi.waitFor([ s.delete([ n, i ]), this.referenceDelegate.removeReference(t, n, e) ]);
+        const s = dr(t);
+        return si.forEach(e, (e => {
+            const i = Vs(e.path);
+            return si.waitFor([ s.delete([ n, i ]), this.referenceDelegate.removeReference(t, n, e) ]);
         }));
     }
     removeMatchingKeysForTargetId(t, e) {
-        const n = Dr(t), s = IDBKeyRange.bound([ e ], [ e + 1 ], 
+        const n = dr(t), s = IDBKeyRange.bound([ e ], [ e + 1 ], 
         /*lowerOpen=*/ !1, 
         /*upperOpen=*/ !0);
         return n.delete(s);
@@ -11612,23 +11232,23 @@ class br {
     getMatchingKeysForTargetId(t, e) {
         const n = IDBKeyRange.bound([ e ], [ e + 1 ], 
         /*lowerOpen=*/ !1, 
-        /*upperOpen=*/ !0), s = Dr(t);
-        let i = Xn();
-        return s.Wt({
+        /*upperOpen=*/ !0), s = dr(t);
+        let i = On();
+        return s.Qt({
             range: n,
             jt: !0
         }, ((t, e, n) => {
-            const s = zs(t[1]), r = new xt(s);
+            const s = Cs(t[1]), r = new Nt(s);
             i = i.add(r);
         })).next((() => i));
     }
     containsKey(t, e) {
-        const n = Qs(e.path), s = IDBKeyRange.bound([ n ], [ ut(n) ], 
+        const n = Vs(e.path), s = IDBKeyRange.bound([ n ], [ ct(n) ], 
         /*lowerOpen=*/ !1, 
         /*upperOpen=*/ !0);
         let i = 0;
-        return Dr(t).Wt({
-            index: "documentTargetsIndex",
+        return dr(t).Qt({
+            index: qs.documentTargetsIndex,
             jt: !0,
             range: s
         }, (([t, e], n, s) => {
@@ -11646,27 +11266,27 @@ class br {
      * the target.
      */
     // PORTING NOTE: Multi-tab only.
-    Et(t, e) {
-        return vr(t).get(e).next((t => t ? qi(t) : null));
+    Tt(t, e) {
+        return lr(t).get(e).next((t => t ? vi(t) : null));
     }
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the queries object store.
- */ function vr(t) {
-    return Di(t, "targets");
+ */ function lr(t) {
+    return _i(t, Us.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the target globals object store.
- */ function Sr(t) {
-    return Di(t, "targetGlobal");
+ */ function fr(t) {
+    return _i(t, Ks.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the document target object store.
- */ function Dr(t) {
-    return Di(t, "targetDocuments");
+ */ function dr(t) {
+    return _i(t, qs.store);
 }
 
 /**
@@ -11694,9 +11314,9 @@ class br {
  *
  * @param err - An error returned by a LocalStore operation.
  * @returns A Promise that resolves after we recovered, or the original error.
- */ async function Cr(t) {
-    if (t.code !== G.FAILED_PRECONDITION || t.message !== gi) throw t;
-    O("LocalStore", "Unexpectedly lost primary lease");
+ */ async function _r(t) {
+    if (t.code !== G.FAILED_PRECONDITION || t.message !== ei) throw t;
+    M("LocalStore", "Unexpectedly lost primary lease");
 }
 
 /**
@@ -11714,7 +11334,7 @@ class br {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ function xr([t, e], [n, s]) {
+ */ function wr([t, e], [n, s]) {
     const i = rt(t, n);
     return 0 === i ? rt(e, s) : i;
 }
@@ -11723,18 +11343,18 @@ class br {
  * Used to calculate the nth sequence number. Keeps a rolling buffer of the
  * lowest n values passed to `addElement`, and finally reports the largest of
  * them in `maxValue`.
- */ class Nr {
+ */ class mr {
     constructor(t) {
-        this.An = t, this.buffer = new qn(xr), this.Rn = 0;
+        this.en = t, this.buffer = new bn(wr), this.nn = 0;
     }
-    Pn() {
-        return ++this.Rn;
+    sn() {
+        return ++this.nn;
     }
-    bn(t) {
-        const e = [ t, this.Pn() ];
-        if (this.buffer.size < this.An) this.buffer = this.buffer.add(e); else {
+    rn(t) {
+        const e = [ t, this.sn() ];
+        if (this.buffer.size < this.en) this.buffer = this.buffer.add(e); else {
             const t = this.buffer.last();
-            xr(e, t) < 0 && (this.buffer = this.buffer.delete(t).add(e));
+            wr(e, t) < 0 && (this.buffer = this.buffer.delete(t).add(e));
         }
     }
     get maxValue() {
@@ -11751,72 +11371,72 @@ class br {
 /**
  * This class is responsible for the scheduling of LRU garbage collection. It handles checking
  * whether or not GC is enabled, as well as which delay to use before the next run.
- */ class kr {
+ */ class gr {
     constructor(t, e) {
-        this.garbageCollector = t, this.asyncQueue = e, this.Vn = !1, this.vn = null;
+        this.garbageCollector = t, this.asyncQueue = e, this.on = !1, this.cn = null;
     }
     start(t) {
-        -1 !== this.garbageCollector.params.cacheSizeCollectionThreshold && this.Sn(t);
+        -1 !== this.garbageCollector.params.cacheSizeCollectionThreshold && this.un(t);
     }
     stop() {
-        this.vn && (this.vn.cancel(), this.vn = null);
+        this.cn && (this.cn.cancel(), this.cn = null);
     }
     get started() {
-        return null !== this.vn;
+        return null !== this.cn;
     }
-    Sn(t) {
-        const e = this.Vn ? 3e5 : 6e4;
-        O("LruGarbageCollector", `Garbage collection scheduled in ${e}ms`), this.vn = this.asyncQueue.enqueueAfterDelay("lru_garbage_collection" /* LruGarbageCollection */ , e, (async () => {
-            this.vn = null, this.Vn = !0;
+    un(t) {
+        const e = this.on ? 3e5 : 6e4;
+        M("LruGarbageCollector", `Garbage collection scheduled in ${e}ms`), this.cn = this.asyncQueue.enqueueAfterDelay("lru_garbage_collection" /* LruGarbageCollection */ , e, (async () => {
+            this.cn = null, this.on = !0;
             try {
                 await t.collectGarbage(this.garbageCollector);
             } catch (t) {
-                Ri(t) ? O("LruGarbageCollector", "Ignoring IndexedDB error during garbage collection: ", t) : await Cr(t);
+                ui(t) ? M("LruGarbageCollector", "Ignoring IndexedDB error during garbage collection: ", t) : await _r(t);
             }
-            await this.Sn(t);
+            await this.un(t);
         }));
     }
 }
 
-/** Implements the steps for LRU garbage collection. */ class Mr {
+/** Implements the steps for LRU garbage collection. */ class yr {
     constructor(t, e) {
-        this.Dn = t, this.params = e;
+        this.an = t, this.params = e;
     }
     calculateTargetCount(t, e) {
-        return this.Dn.Cn(t).next((t => Math.floor(e / 100 * t)));
+        return this.an.hn(t).next((t => Math.floor(e / 100 * t)));
     }
     nthSequenceNumber(t, e) {
-        if (0 === e) return pi.resolve(nt.A);
-        const n = new Nr(e);
-        return this.Dn.forEachTarget(t, (t => n.bn(t.sequenceNumber))).next((() => this.Dn.xn(t, (t => n.bn(t))))).next((() => n.maxValue));
+        if (0 === e) return si.resolve(nt.A);
+        const n = new mr(e);
+        return this.an.forEachTarget(t, (t => n.rn(t.sequenceNumber))).next((() => this.an.ln(t, (t => n.rn(t))))).next((() => n.maxValue));
     }
     removeTargets(t, e, n) {
-        return this.Dn.removeTargets(t, e, n);
+        return this.an.removeTargets(t, e, n);
     }
     removeOrphanedDocuments(t, e) {
-        return this.Dn.removeOrphanedDocuments(t, e);
+        return this.an.removeOrphanedDocuments(t, e);
     }
     collect(t, e) {
-        return -1 === this.params.cacheSizeCollectionThreshold ? (O("LruGarbageCollector", "Garbage collection skipped; disabled"), 
-        pi.resolve(gr)) : this.getCacheSize(t).next((n => n < this.params.cacheSizeCollectionThreshold ? (O("LruGarbageCollector", `Garbage collection skipped; Cache size ${n} is lower than threshold ${this.params.cacheSizeCollectionThreshold}`), 
-        gr) : this.Nn(t, e)));
+        return -1 === this.params.cacheSizeCollectionThreshold ? (M("LruGarbageCollector", "Garbage collection skipped; disabled"), 
+        si.resolve(tr)) : this.getCacheSize(t).next((n => n < this.params.cacheSizeCollectionThreshold ? (M("LruGarbageCollector", `Garbage collection skipped; Cache size ${n} is lower than threshold ${this.params.cacheSizeCollectionThreshold}`), 
+        tr) : this.fn(t, e)));
     }
     getCacheSize(t) {
-        return this.Dn.getCacheSize(t);
+        return this.an.getCacheSize(t);
     }
-    Nn(t, e) {
-        let n, s, i, r, o, a, c;
+    fn(t, e) {
+        let n, s, i, r, o, u, a;
         const h = Date.now();
         return this.calculateTargetCount(t, this.params.percentileToCollect).next((e => (
         // Cap at the configured max
-        e > this.params.maximumSequenceNumbersToCollect ? (O("LruGarbageCollector", `Capping sequence numbers to collect down to the maximum of ${this.params.maximumSequenceNumbersToCollect} from ${e}`), 
+        e > this.params.maximumSequenceNumbersToCollect ? (M("LruGarbageCollector", `Capping sequence numbers to collect down to the maximum of ${this.params.maximumSequenceNumbersToCollect} from ${e}`), 
         s = this.params.maximumSequenceNumbersToCollect) : s = e, r = Date.now(), this.nthSequenceNumber(t, s)))).next((s => (n = s, 
-        o = Date.now(), this.removeTargets(t, n, e)))).next((e => (i = e, a = Date.now(), 
+        o = Date.now(), this.removeTargets(t, n, e)))).next((e => (i = e, u = Date.now(), 
         this.removeOrphanedDocuments(t, n)))).next((t => {
-            if (c = Date.now(), k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG) {
-                O("LruGarbageCollector", `LRU Garbage Collection\n\tCounted targets in ${r - h}ms\n\tDetermined least recently used ${s} in ` + (o - r) + "ms\n" + `\tRemoved ${i} targets in ` + (a - o) + "ms\n" + `\tRemoved ${t} documents in ` + (c - a) + "ms\n" + `Total Duration: ${c - h}ms`);
+            if (a = Date.now(), k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG) {
+                M("LruGarbageCollector", `LRU Garbage Collection\n\tCounted targets in ${r - h}ms\n\tDetermined least recently used ${s} in ` + (o - r) + "ms\n" + `\tRemoved ${i} targets in ` + (u - o) + "ms\n" + `\tRemoved ${t} documents in ` + (a - u) + "ms\n" + `Total Duration: ${a - h}ms`);
             }
-            return pi.resolve({
+            return si.resolve({
                 didRun: !0,
                 sequenceNumbersCollected: s,
                 targetsRemoved: i,
@@ -11843,88 +11463,88 @@ class br {
  * limitations under the License.
  */
 /** Provides LRU functionality for IndexedDB persistence. */
-class Or {
+class pr {
     constructor(t, e) {
         this.db = t, this.garbageCollector = function(t, e) {
-            return new Mr(t, e);
+            return new yr(t, e);
         }(this, e);
     }
-    Cn(t) {
-        const e = this.kn(t);
+    hn(t) {
+        const e = this.dn(t);
         return this.db.getTargetCache().getTargetCount(t).next((t => e.next((e => t + e))));
     }
-    kn(t) {
+    dn(t) {
         let e = 0;
-        return this.xn(t, (t => {
+        return this.ln(t, (t => {
             e++;
         })).next((() => e));
     }
     forEachTarget(t, e) {
         return this.db.getTargetCache().forEachTarget(t, e);
     }
-    xn(t, e) {
-        return this.Mn(t, ((t, n) => e(n)));
+    ln(t, e) {
+        return this._n(t, ((t, n) => e(n)));
     }
     addReference(t, e, n) {
-        return Fr(t, n);
+        return Ir(t, n);
     }
     removeReference(t, e, n) {
-        return Fr(t, n);
+        return Ir(t, n);
     }
     removeTargets(t, e, n) {
         return this.db.getTargetCache().removeTargets(t, e, n);
     }
     markPotentiallyOrphaned(t, e) {
-        return Fr(t, e);
+        return Ir(t, e);
     }
     /**
      * Returns true if anything would prevent this document from being garbage
      * collected, given that the document in question is not present in any
      * targets and has a sequence number less than or equal to the upper bound for
      * the collection run.
-     */    On(t, e) {
+     */    wn(t, e) {
         return function(t, e) {
             let n = !1;
-            return Pr(t).zt((s => Er(t, s, e).next((t => (t && (n = !0), pi.resolve(!t)))))).next((() => n));
+            return ur(t).Wt((s => rr(t, s, e).next((t => (t && (n = !0), si.resolve(!t)))))).next((() => n));
         }(t, e);
     }
     removeOrphanedDocuments(t, e) {
         const n = this.db.getRemoteDocumentCache().newChangeBuffer(), s = [];
         let i = 0;
-        return this.Mn(t, ((r, o) => {
+        return this._n(t, ((r, o) => {
             if (o <= e) {
-                const e = this.On(t, r).next((e => {
+                const e = this.wn(t, r).next((e => {
                     if (!e) 
                     // Our size accounting requires us to read all documents before
                     // removing them.
-                    return i++, n.getEntry(t, r).next((() => (n.removeEntry(r, ct.min()), Dr(t).delete([ 0, Qs(r.path) ]))));
+                    return i++, n.getEntry(t, r).next((() => (n.removeEntry(r, at.min()), dr(t).delete([ 0, Vs(r.path) ]))));
                 }));
                 s.push(e);
             }
-        })).next((() => pi.waitFor(s))).next((() => n.apply(t))).next((() => i));
+        })).next((() => si.waitFor(s))).next((() => n.apply(t))).next((() => i));
     }
     removeTarget(t, e) {
         const n = e.withSequenceNumber(t.currentSequenceNumber);
         return this.db.getTargetCache().updateTargetData(t, n);
     }
     updateLimboDocument(t, e) {
-        return Fr(t, e);
+        return Ir(t, e);
     }
     /**
      * Call provided function for each document in the cache that is 'orphaned'. Orphaned
      * means not a part of any target, so the only entry in the target-document index for
      * that document will be the sentinel row (targetId 0), which will also have the sequence
      * number for the last time the document was accessed.
-     */    Mn(t, e) {
-        const n = Dr(t);
+     */    _n(t, e) {
+        const n = dr(t);
         let s, i = nt.A;
-        return n.Wt({
-            index: "documentTargetsIndex"
+        return n.Qt({
+            index: qs.documentTargetsIndex
         }, (([t, n], {path: r, sequenceNumber: o}) => {
             0 === t ? (
             // if nextToReport is valid, report it, this is a new key so the
             // last one must not be a member of any targets.
-            i !== nt.A && e(new xt(zs(s)), i), 
+            i !== nt.A && e(new Nt(Cs(s)), i), 
             // set nextToReport to be this sequence number. It's the next one we
             // might report, if we don't find any targets for this document.
             // Note that the sequence number must be defined when the targetId
@@ -11937,7 +11557,7 @@ class Or {
             // Since we report sequence numbers after getting to the next key, we
             // need to check if the last key we iterated over was an orphaned
             // document and report it.
-            i !== nt.A && e(new xt(zs(s)), i);
+            i !== nt.A && e(new Nt(Cs(s)), i);
         }));
     }
     getCacheSize(t) {
@@ -11945,19 +11565,80 @@ class Or {
     }
 }
 
-function Fr(t, e) {
-    return Dr(t).put(
+function Ir(t, e) {
+    return dr(t).put(
     /**
  * @returns A value suitable for writing a sentinel row in the target-document
  * store.
  */
     function(t, e) {
-        return {
-            targetId: 0,
-            path: Qs(t.path),
-            sequenceNumber: e
-        };
+        return new qs(0, Vs(t.path), e);
     }(e, t.currentSequenceNumber));
+}
+
+/**
+ * @license
+ * Copyright 2017 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/**
+ * A map implementation that uses objects as keys. Objects must have an
+ * associated equals function and must be immutable. Entries in the map are
+ * stored together with the key being produced from the mapKeyFn. This map
+ * automatically handles collisions of keys.
+ */ class Er {
+    constructor(t, e) {
+        this.mapKeyFn = t, this.equalsFn = e, 
+        /**
+         * The inner map for a key/value pair. Due to the possibility of collisions we
+         * keep a list of entries that we do a linear search through to find an actual
+         * match. Note that collisions should be rare, so we still expect near
+         * constant time lookups in practice.
+         */
+        this.inner = {};
+    }
+    /** Get a value for this key, or undefined if it does not exist. */    get(t) {
+        const e = this.mapKeyFn(t), n = this.inner[e];
+        if (void 0 !== n) for (const [e, s] of n) if (this.equalsFn(e, t)) return s;
+    }
+    has(t) {
+        return void 0 !== this.get(t);
+    }
+    /** Put this key and value in the map. */    set(t, e) {
+        const n = this.mapKeyFn(t), s = this.inner[n];
+        if (void 0 !== s) {
+            for (let n = 0; n < s.length; n++) if (this.equalsFn(s[n][0], t)) return void (s[n] = [ t, e ]);
+            s.push([ t, e ]);
+        } else this.inner[n] = [ [ t, e ] ];
+    }
+    /**
+     * Remove this key from the map. Returns a boolean if anything was deleted.
+     */    delete(t) {
+        const e = this.mapKeyFn(t), n = this.inner[e];
+        if (void 0 === n) return !1;
+        for (let s = 0; s < n.length; s++) if (this.equalsFn(n[s][0], t)) return 1 === n.length ? delete this.inner[e] : n.splice(s, 1), 
+        !0;
+        return !1;
+    }
+    forEach(t) {
+        lt(this.inner, ((e, n) => {
+            for (const [e, s] of n) t(e, s);
+        }));
+    }
+    isEmpty() {
+        return ft(this.inner);
+    }
 }
 
 /**
@@ -11989,10 +11670,10 @@ function Fr(t, e) {
  * PORTING NOTE: This class was implemented then removed from other platforms.
  * If byte-counting ends up being needed on the other platforms, consider
  * porting this class as part of that implementation work.
- */ class $r {
+ */ class Tr {
     constructor() {
         // A mapping of document key to the new cache entry that should be written.
-        this.changes = new $n((t => t.toString()), ((t, e) => t.isEqual(e))), this.changesApplied = !1;
+        this.changes = new Er((t => t.toString()), ((t, e) => t.isEqual(e))), this.changesApplied = !1;
     }
     /**
      * Buffers a `RemoteDocumentCache.addEntry()` call.
@@ -12008,7 +11689,7 @@ function Fr(t, e) {
      * You can only remove documents that have already been retrieved via
      * `getEntry()/getEntries()` (enforced via IndexedDbs `apply()`).
      */    removeEntry(t, e) {
-        this.assertNotApplied(), this.changes.set(t, ne.newInvalidDocument(t).setReadTime(e));
+        this.assertNotApplied(), this.changes.set(t, Jt.newInvalidDocument(t).setReadTime(e));
     }
     /**
      * Looks up an entry in the cache. The buffered changes will first be checked,
@@ -12023,7 +11704,7 @@ function Fr(t, e) {
      */    getEntry(t, e) {
         this.assertNotApplied();
         const n = this.changes.get(e);
-        return void 0 !== n ? pi.resolve(n) : this.getFromCache(t, e);
+        return void 0 !== n ? si.resolve(n) : this.getFromCache(t, e);
     }
     /**
      * Looks up several entries in the cache, forwarding to
@@ -12065,9 +11746,9 @@ function Fr(t, e) {
 /**
  * The RemoteDocumentCache for IndexedDb. To construct, invoke
  * `newIndexedDbRemoteDocumentCache()`.
- */ class Br {
+ */ class Ar {
     constructor(t) {
-        this.M = t;
+        this.O = t;
     }
     setIndexManager(t) {
         this.indexManager = t;
@@ -12078,30 +11759,16 @@ function Fr(t, e) {
      * All calls of `addEntry` are required to go through the RemoteDocumentChangeBuffer
      * returned by `newChangeBuffer()` to ensure proper accounting of metadata.
      */    addEntry(t, e, n) {
-        return qr(t).put(n);
+        return br(t).put(vr(e), n);
     }
     /**
      * Removes a document from the cache.
      *
      * All calls of `removeEntry`  are required to go through the RemoteDocumentChangeBuffer
      * returned by `newChangeBuffer()` to ensure proper accounting of metadata.
-     */    removeEntry(t, e, n) {
-        return qr(t).delete(
-        /**
- * Returns a key that can be used for document lookups via the primary key of
- * the DbRemoteDocument object store.
- */
-        function(t, e) {
-            const n = t.path.toArray();
-            return [ 
-            /* prefix path */ n.slice(0, n.length - 2), 
-            /* collection id */ n[n.length - 2], $i(e), 
-            /* document id */ n[n.length - 1] ];
-        }
-        /**
- * Returns a key that can be used for document lookups on the
- * `DbRemoteDocumentDocumentCollectionGroupIndex` index.
- */ (e, n));
+     */    removeEntry(t, e) {
+        const n = br(t), s = vr(e);
+        return n.delete(s);
     }
     /**
      * Updates the current cache size.
@@ -12109,41 +11776,26 @@ function Fr(t, e) {
      * Callers to `addEntry()` and `removeEntry()` *must* call this afterwards to update the
      * cache's metadata.
      */    updateMetadata(t, e) {
-        return this.getMetadata(t).next((n => (n.byteSize += e, this.Fn(t, n))));
+        return this.getMetadata(t).next((n => (n.byteSize += e, this.mn(t, n))));
     }
     getEntry(t, e) {
-        let n = ne.newInvalidDocument(e);
-        return qr(t).Wt({
-            index: "documentKeyIndex",
-            range: IDBKeyRange.only(Kr(e))
-        }, ((t, s) => {
-            n = this.$n(e, s);
-        })).next((() => n));
+        return br(t).get(vr(e)).next((t => this.gn(e, t)));
     }
     /**
      * Looks up an entry in the cache.
      *
      * @param documentKey - The key of the entry to look up.
      * @returns The cached document entry and its size.
-     */    Bn(t, e) {
-        let n = {
-            size: 0,
-            document: ne.newInvalidDocument(e)
-        };
-        return qr(t).Wt({
-            index: "documentKeyIndex",
-            range: IDBKeyRange.only(Kr(e))
-        }, ((t, s) => {
-            n = {
-                document: this.$n(e, s),
-                size: Ir(s)
-            };
-        })).next((() => n));
+     */    yn(t, e) {
+        return br(t).get(vr(e)).next((t => ({
+            document: this.gn(e, t),
+            size: sr(t)
+        })));
     }
     getEntries(t, e) {
-        let n = jn();
-        return this.Ln(t, e, ((t, e) => {
-            const s = this.$n(t, e);
+        let n = Dn();
+        return this.pn(t, e, ((t, e) => {
+            const s = this.gn(t, e);
             n = n.insert(t, s);
         })).next((() => n));
     }
@@ -12153,85 +11805,87 @@ function Fr(t, e) {
      * @param documentKeys - The set of keys entries to look up.
      * @returns A map of documents indexed by key and a map of sizes indexed by
      *     key (zero if the document does not exist).
-     */    Un(t, e) {
-        let n = jn(), s = new Bn(xt.comparator);
-        return this.Ln(t, e, ((t, e) => {
-            const i = this.$n(t, e);
-            n = n.insert(t, i), s = s.insert(t, Ir(e));
+     */    In(t, e) {
+        let n = Dn(), s = new An(Nt.comparator);
+        return this.pn(t, e, ((t, e) => {
+            const i = this.gn(t, e);
+            n = n.insert(t, i), s = s.insert(t, sr(e));
         })).next((() => ({
             documents: n,
-            qn: s
+            En: s
         })));
     }
-    Ln(t, e, n) {
-        if (e.isEmpty()) return pi.resolve();
-        let s = new qn(Qr);
-        e.forEach((t => s = s.add(t)));
-        const i = IDBKeyRange.bound(Kr(s.first()), Kr(s.last())), r = s.getIterator();
-        let o = r.getNext();
-        return qr(t).Wt({
-            index: "documentKeyIndex",
-            range: i
+    pn(t, e, n) {
+        if (e.isEmpty()) return si.resolve();
+        const s = IDBKeyRange.bound(e.first().path.toArray(), e.last().path.toArray()), i = e.getIterator();
+        let r = i.getNext();
+        return br(t).Qt({
+            range: s
         }, ((t, e, s) => {
-            const i = xt.fromSegments([ ...e.prefixPath, e.collectionGroup, e.documentId ]);
+            const o = Nt.fromSegments(t);
             // Go through keys not found in cache.
-                        for (;o && Qr(o, i) < 0; ) n(o, null), o = r.getNext();
-            o && o.isEqual(i) && (
+                        for (;r && Nt.comparator(r, o) < 0; ) n(r, null), r = i.getNext();
+            r && r.isEqual(o) && (
             // Key found in cache.
-            n(o, e), o = r.hasNext() ? r.getNext() : null), 
+            n(r, e), r = i.hasNext() ? i.getNext() : null), 
             // Skip to the next key (if there is one).
-            o ? s.Ut(Kr(o)) : s.done();
+            r ? s.Ut(r.path.toArray()) : s.done();
         })).next((() => {
             // The rest of the keys are not in the cache. One case where `iterate`
             // above won't go through them is when the cache is empty.
-            for (;o; ) n(o, null), o = r.hasNext() ? r.getNext() : null;
+            for (;r; ) n(r, null), r = i.hasNext() ? i.getNext() : null;
         }));
     }
-    getAllFromCollection(t, e, n) {
-        const s = [ e.popLast().toArray(), e.lastSegment(), $i(n.readTime), n.documentKey.path.isEmpty() ? "" : n.documentKey.path.lastSegment() ], i = [ e.popLast().toArray(), e.lastSegment(), [ Number.MAX_SAFE_INTEGER, Number.MAX_SAFE_INTEGER ], "" ];
-        return qr(t).qt(IDBKeyRange.bound(s, i, !0)).next((t => {
-            let e = jn();
-            for (const n of t) {
-                const t = this.$n(xt.fromSegments(n.prefixPath.concat(n.collectionGroup, n.documentId)), n);
-                e = e.insert(t.key, t);
-            }
-            return e;
-        }));
-    }
-    getAllFromCollectionGroup(t, e, n, s) {
-        let i = jn();
-        const r = Gr(e, n), o = Gr(e, he.max());
-        return qr(t).Wt({
-            index: "collectionGroupIndex",
-            range: IDBKeyRange.bound(r, o, !0)
-        }, ((t, e, n) => {
-            const r = this.$n(xt.fromSegments(e.prefixPath.concat(e.collectionGroup, e.documentId)), e);
-            i = i.insert(r.key, r), i.size === s && n.done();
-        })).next((() => i));
+    getAll(t, e, n) {
+        let s = Dn();
+        const i = e.length + 1, r = {};
+        if (n.isEqual(at.min())) {
+            // Documents are ordered by key, so we can use a prefix scan to narrow
+            // down the documents we need to match the query against.
+            const t = e.toArray();
+            r.range = IDBKeyRange.lowerBound(t);
+        } else {
+            // Execute an index-free query and filter by read time. This is safe
+            // since all document changes to queries that have a
+            // lastLimboFreeSnapshotVersion (`sinceReadTime`) have a read time set.
+            const t = e.toArray(), s = Ti(n);
+            r.range = IDBKeyRange.lowerBound([ t, s ], 
+            /* open= */ !0), r.index = Bs.collectionReadTimeIndex;
+        }
+        return br(t).Qt(r, ((t, n, r) => {
+            // The query is actually returning any path that starts with the query
+            // path prefix which may include documents in subcollections. For
+            // example, a query on 'rooms' will return rooms/abc/messages/xyx but we
+            // shouldn't match it. Fix this by discarding rows with document keys
+            // more than one segment longer than the query path.
+            if (t.length !== i) return;
+            const o = this.gn(Nt.fromSegments(t), n);
+            e.isPrefixOf(o.key.path) ? s = s.insert(o.key, o) : r.done();
+        })).next((() => s));
     }
     newChangeBuffer(t) {
-        return new Lr(this, !!t && t.trackRemovals);
+        return new Rr(this, !!t && t.trackRemovals);
     }
     getSize(t) {
         return this.getMetadata(t).next((t => t.byteSize));
     }
     getMetadata(t) {
-        return Ur(t).get("remoteDocumentGlobalKey").next((t => (U(!!t), t)));
+        return Pr(t).get(Ls.key).next((t => (U(!!t), t)));
     }
-    Fn(t, e) {
-        return Ur(t).put("remoteDocumentGlobalKey", e);
+    mn(t, e) {
+        return Pr(t).put(Ls.key, e);
     }
     /**
      * Decodes `dbRemoteDoc` and returns the document (or an invalid document if
      * the document corresponds to the format used for sentinel deletes).
-     */    $n(t, e) {
+     */    gn(t, e) {
         if (e) {
-            const t = Oi(this.M, e);
+            const t = Ii(this.O, e);
             // Whether the document is a sentinel removal and should only be used in the
             // `getNewDocumentChanges()`
-                        if (!(t.isNoDocument() && t.version.isEqual(ct.min()))) return t;
+                        if (!(t.isNoDocument() && t.version.isEqual(at.min()))) return t;
         }
-        return ne.newInvalidDocument(t);
+        return Jt.newInvalidDocument(t);
     }
 }
 
@@ -12243,125 +11897,70 @@ function Fr(t, e) {
  * delta for all submitted changes. This avoids having to re-read all documents from IndexedDb
  * when we apply the changes.
  */
-class Lr extends $r {
+class Rr extends Tr {
     /**
      * @param documentCache - The IndexedDbRemoteDocumentCache to apply the changes to.
      * @param trackRemovals - Whether to create sentinel deletes that can be tracked by
      * `getNewDocumentChanges()`.
      */
     constructor(t, e) {
-        super(), this.Kn = t, this.trackRemovals = e, 
-        // A map of document sizes and read times prior to applying the changes in
-        // this buffer.
-        this.Gn = new $n((t => t.toString()), ((t, e) => t.isEqual(e)));
+        super(), this.Tn = t, this.trackRemovals = e, 
+        // A map of document sizes prior to applying the changes in this buffer.
+        this.An = new Er((t => t.toString()), ((t, e) => t.isEqual(e)));
     }
     applyChanges(t) {
         const e = [];
-        let n = 0, s = new qn(((t, e) => rt(t.canonicalString(), e.canonicalString())));
+        let n = 0, s = new bn(((t, e) => rt(t.canonicalString(), e.canonicalString())));
         return this.changes.forEach(((i, r) => {
-            const o = this.Gn.get(i);
-            if (e.push(this.Kn.removeEntry(t, i, o.readTime)), r.isValidDocument()) {
-                const u = Fi(this.Kn.M, r);
+            const o = this.An.get(i);
+            if (r.isValidDocument()) {
+                const c = Ei(this.Tn.O, r);
                 s = s.add(i.path.popLast());
-                const a = Ir(u);
-                n += a - o.size, e.push(this.Kn.addEntry(t, i, u));
-            } else if (n -= o.size, this.trackRemovals) {
+                const u = sr(c);
+                n += u - o, e.push(this.Tn.addEntry(t, i, c));
+            } else if (n -= o, this.trackRemovals) {
                 // In order to track removals, we store a "sentinel delete" in the
                 // RemoteDocumentCache. This entry is represented by a NoDocument
                 // with a version of 0 and ignored by `maybeDecodeDocument()` but
                 // preserved in `getNewDocumentChanges()`.
-                const n = Fi(this.Kn.M, r.convertToNoDocument(ct.min()));
-                e.push(this.Kn.addEntry(t, i, n));
-            }
+                const n = Ei(this.Tn.O, r.convertToNoDocument(at.min()));
+                e.push(this.Tn.addEntry(t, i, n));
+            } else e.push(this.Tn.removeEntry(t, i));
         })), s.forEach((n => {
-            e.push(this.Kn.indexManager.addToCollectionParentIndex(t, n));
-        })), e.push(this.Kn.updateMetadata(t, n)), pi.waitFor(e);
+            e.push(this.Tn.indexManager.addToCollectionParentIndex(t, n));
+        })), e.push(this.Tn.updateMetadata(t, n)), si.waitFor(e);
     }
     getFromCache(t, e) {
         // Record the size of everything we load from the cache so we can compute a delta later.
-        return this.Kn.Bn(t, e).next((t => (this.Gn.set(e, {
-            size: t.size,
-            readTime: t.document.readTime
-        }), t.document)));
+        return this.Tn.yn(t, e).next((t => (this.An.set(e, t.size), t.document)));
     }
     getAllFromCache(t, e) {
         // Record the size of everything we load from the cache so we can compute
         // a delta later.
-        return this.Kn.Un(t, e).next((({documents: t, qn: e}) => (
+        return this.Tn.In(t, e).next((({documents: t, En: e}) => (
         // Note: `getAllFromCache` returns two maps instead of a single map from
         // keys to `DocumentSizeEntry`s. This is to allow returning the
         // `MutableDocumentMap` directly, without a conversion.
-        e.forEach(((e, n) => {
-            this.Gn.set(e, {
-                size: n,
-                readTime: t.get(e).readTime
-            });
+        e.forEach(((t, e) => {
+            this.An.set(t, e);
         })), t)));
     }
 }
 
-function Ur(t) {
-    return Di(t, "remoteDocumentGlobal");
+function Pr(t) {
+    return _i(t, Ls.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the remoteDocuments object store.
- */ function qr(t) {
-    return Di(t, "remoteDocumentsV14");
+ */ function br(t) {
+    return _i(t, Bs.store);
 }
 
-/**
- * Returns a key that can be used for document lookups on the
- * `DbRemoteDocumentDocumentKeyIndex` index.
- */ function Kr(t) {
-    const e = t.path.toArray();
-    return [ 
-    /* prefix path */ e.slice(0, e.length - 2), 
-    /* collection id */ e[e.length - 2], 
-    /* document id */ e[e.length - 1] ];
+function vr(t) {
+    return t.path.toArray();
 }
 
-function Gr(t, e) {
-    const n = e.documentKey.path.toArray();
-    return [ 
-    /* collection id */ t, $i(e.readTime), 
-    /* prefix path */ n.slice(0, n.length - 2), 
-    /* document id */ n.length > 0 ? n[n.length - 1] : "" ];
-}
-
-/**
- * Comparator that compares document keys according to the primary key sorting
- * used by the `DbRemoteDocumentDocument` store (by prefix path, collection id
- * and then document ID).
- *
- * Visible for testing.
- */ function Qr(t, e) {
-    const n = t.path.toArray(), s = e.path.toArray();
-    // The ordering is based on https://chromium.googlesource.com/chromium/blink/+/fe5c21fef94dae71c1c3344775b8d8a7f7e6d9ec/Source/modules/indexeddb/IDBKey.cpp#74
-    let i = 0;
-    for (let t = 0; t < n.length - 2 && t < s.length - 2; ++t) if (i = rt(n[t], s[t]), 
-    i) return i;
-    return i = rt(n.length, s.length), i || (i = rt(n[n.length - 2], s[s.length - 2]), 
-    i || rt(n[n.length - 1], s[s.length - 1]));
-}
-
-/**
- * @license
- * Copyright 2017 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-// TODO(indexing): Remove this constant
 /**
  * @license
  * Copyright 2020 Google LLC
@@ -12378,10 +11977,9 @@ function Gr(t, e) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** Performs database creation and schema upgrades. */
-class jr {
+/** Performs database creation and schema upgrades. */ class Vr {
     constructor(t) {
-        this.M = t;
+        this.O = t;
     }
     /**
      * Performs database creation and schema upgrades.
@@ -12390,49 +11988,51 @@ class jr {
      * to SCHEMA_VERSION. Different values of toVersion are only used for testing
      * and local feature development.
      */    kt(t, e, n, s) {
-        const i = new Ii("createOrUpgrade", e);
+        const i = new ii("createOrUpgrade", e);
         n < 1 && s >= 1 && (function(t) {
-            t.createObjectStore("owner");
+            t.createObjectStore(xs.store);
         }(t), function(t) {
-            t.createObjectStore("mutationQueues", {
-                keyPath: "userId"
+            t.createObjectStore(ks.store, {
+                keyPath: ks.keyPath
             });
-            t.createObjectStore("mutations", {
-                keyPath: "batchId",
+            t.createObjectStore(Os.store, {
+                keyPath: Os.keyPath,
                 autoIncrement: !0
-            }).createIndex("userMutationsIndex", Hs, {
+            }).createIndex(Os.userMutationsIndex, Os.userMutationsKeyPath, {
                 unique: !0
-            }), t.createObjectStore("documentMutations");
+            }), t.createObjectStore(Ms.store);
         }
         /**
  * Upgrade function to migrate the 'mutations' store from V1 to V3. Loads
  * and rewrites all data.
- */ (t), Wr(t), function(t) {
-            t.createObjectStore("remoteDocuments");
+ */ (t), Sr(t), function(t) {
+            t.createObjectStore(Bs.store);
         }(t));
         // Migration 2 to populate the targetGlobal object no longer needed since
         // migration 3 unconditionally clears it.
-                let r = pi.resolve();
+                let r = si.resolve();
         return n < 3 && s >= 3 && (
         // Brand new clients don't need to drop and recreate--only clients that
         // potentially have corrupt data.
         0 !== n && (!function(t) {
-            t.deleteObjectStore("targetDocuments"), t.deleteObjectStore("targets"), t.deleteObjectStore("targetGlobal");
-        }(t), Wr(t)), r = r.next((() => 
+            t.deleteObjectStore(qs.store), t.deleteObjectStore(Us.store), t.deleteObjectStore(Ks.store);
+        }(t), Sr(t)), r = r.next((() => 
         /**
  * Creates the target global singleton row.
  *
  * @param txn - The version upgrade transaction for indexeddb
  */
         function(t) {
-            const e = t.store("targetGlobal"), n = {
-                highestTargetId: 0,
-                highestListenSequenceNumber: 0,
-                lastRemoteSnapshotVersion: ct.min().toTimestamp(),
-                targetCount: 0
-            };
-            return e.put("targetGlobalKey", n);
-        }(i)))), n < 4 && s >= 4 && (0 !== n && (
+            const e = t.store(Ks.store), n = new Ks(
+            /*highestTargetId=*/ 0, 
+            /*lastListenSequenceNumber=*/ 0, at.min().toTimestamp(), 
+            /*targetCount=*/ 0);
+            return e.put(Ks.key, n);
+        }
+        /**
+ * Creates indices on the RemoteDocuments store used for both multi-tab
+ * and Index-Free queries.
+ */ (i)))), n < 4 && s >= 4 && (0 !== n && (
         // Schema version 3 uses auto-generated keys to generate globally unique
         // mutation batch IDs (this was previously ensured internally by the
         // client). To migrate to the new schema, we have to read all mutations
@@ -12440,164 +12040,61 @@ class jr {
         // consistency with other object stores. Any further mutation batch IDs will
         // be auto-generated.
         r = r.next((() => function(t, e) {
-            return e.store("mutations").qt().next((n => {
-                t.deleteObjectStore("mutations");
-                t.createObjectStore("mutations", {
-                    keyPath: "batchId",
+            return e.store(Os.store).qt().next((n => {
+                t.deleteObjectStore(Os.store);
+                t.createObjectStore(Os.store, {
+                    keyPath: Os.keyPath,
                     autoIncrement: !0
-                }).createIndex("userMutationsIndex", Hs, {
+                }).createIndex(Os.userMutationsIndex, Os.userMutationsKeyPath, {
                     unique: !0
                 });
-                const s = e.store("mutations"), i = n.map((t => s.put(t)));
-                return pi.waitFor(i);
+                const s = e.store(Os.store), i = n.map((t => s.put(t)));
+                return si.waitFor(i);
             }));
         }(t, i)))), r = r.next((() => {
             !function(t) {
-                t.createObjectStore("clientMetadata", {
-                    keyPath: "clientId"
+                t.createObjectStore(js.store, {
+                    keyPath: js.keyPath
                 });
             }(t);
-        }))), n < 5 && s >= 5 && (r = r.next((() => this.Qn(i)))), n < 6 && s >= 6 && (r = r.next((() => (function(t) {
-            t.createObjectStore("remoteDocumentGlobal");
-        }(t), this.jn(i))))), n < 7 && s >= 7 && (r = r.next((() => this.Wn(i)))), n < 8 && s >= 8 && (r = r.next((() => this.zn(t, i)))), 
+        }))), n < 5 && s >= 5 && (r = r.next((() => this.Rn(i)))), n < 6 && s >= 6 && (r = r.next((() => (function(t) {
+            t.createObjectStore(Ls.store);
+        }(t), this.Pn(i))))), n < 7 && s >= 7 && (r = r.next((() => this.bn(i)))), n < 8 && s >= 8 && (r = r.next((() => this.vn(t, i)))), 
         n < 9 && s >= 9 && (r = r.next((() => {
             // Multi-Tab used to manage its own changelog, but this has been moved
             // to the DbRemoteDocument object store itself. Since the previous change
             // log only contained transient data, we can drop its object store.
             !function(t) {
                 t.objectStoreNames.contains("remoteDocumentChanges") && t.deleteObjectStore("remoteDocumentChanges");
-            }(t);
-            // Note: Schema version 9 used to create a read time index for the
-            // RemoteDocumentCache. This is now done with schema version 13.
-                }))), n < 10 && s >= 10 && (r = r.next((() => this.Hn(i)))), n < 11 && s >= 11 && (r = r.next((() => {
+            }(t), function(t) {
+                const e = t.objectStore(Bs.store);
+                e.createIndex(Bs.readTimeIndex, Bs.readTimeIndexPath, {
+                    unique: !1
+                }), e.createIndex(Bs.collectionReadTimeIndex, Bs.collectionReadTimeIndexPath, {
+                    unique: !1
+                });
+            }(e);
+        }))), n < 10 && s >= 10 && (r = r.next((() => this.Vn(i)))), n < 11 && s >= 11 && (r = r.next((() => {
             !function(t) {
-                t.createObjectStore("bundles", {
-                    keyPath: "bundleId"
+                t.createObjectStore(Qs.store, {
+                    keyPath: Qs.keyPath
                 });
             }(t), function(t) {
-                t.createObjectStore("namedQueries", {
-                    keyPath: "name"
+                t.createObjectStore(Ws.store, {
+                    keyPath: Ws.keyPath
                 });
             }(t);
         }))), n < 12 && s >= 12 && (r = r.next((() => {
             !function(t) {
-                const e = t.createObjectStore("documentOverlays", {
-                    keyPath: hi
+                const e = t.createObjectStore(Ys.store, {
+                    keyPath: Ys.keyPath
                 });
-                e.createIndex("collectionPathOverlayIndex", li, {
+                e.createIndex(Ys.collectionPathOverlayIndex, Ys.collectionPathOverlayIndexPath, {
                     unique: !1
-                }), e.createIndex("collectionGroupOverlayIndex", fi, {
+                }), e.createIndex(Ys.collectionGroupOverlayIndex, Ys.collectionGroupOverlayIndexPath, {
                     unique: !1
-                });
-            }(t);
-        }))), n < 13 && s >= 13 && (r = r.next((() => function(t) {
-            const e = t.createObjectStore("remoteDocumentsV14", {
-                keyPath: Zs
-            });
-            e.createIndex("documentKeyIndex", ti), e.createIndex("collectionGroupIndex", ei);
-        }(t))).next((() => this.Jn(t, i))).next((() => t.deleteObjectStore("remoteDocuments")))), 
-        n < 14 && s >= 14 && (r = r.next((() => {
-            !function(t) {
-                t.createObjectStore("indexConfiguration", {
-                    keyPath: "indexId",
-                    autoIncrement: !0
-                }).createIndex("collectionGroupIndex", "collectionGroup", {
-                    unique: !1
-                });
-                t.createObjectStore("indexState", {
-                    keyPath: oi
-                }).createIndex("sequenceNumberIndex", ui, {
-                    unique: !1
-                });
-                t.createObjectStore("indexEntries", {
-                    keyPath: ai
-                }).createIndex("documentKeyIndex", ci, {
-                    unique: !1
-                });
-            }(t);
-        }))), r;
-    }
-    jn(t) {
-        let e = 0;
-        return t.store("remoteDocuments").Wt(((t, n) => {
-            e += Ir(n);
-        })).next((() => {
-            const n = {
-                byteSize: e
-            };
-            return t.store("remoteDocumentGlobal").put("remoteDocumentGlobalKey", n);
-        }));
-    }
-    Qn(t) {
-        const e = t.store("mutationQueues"), n = t.store("mutations");
-        return e.qt().next((e => pi.forEach(e, (e => {
-            const s = IDBKeyRange.bound([ e.userId, -1 ], [ e.userId, e.lastAcknowledgedBatchId ]);
-            return n.qt("userMutationsIndex", s).next((n => pi.forEach(n, (n => {
-                U(n.userId === e.userId);
-                const s = Ui(this.M, n);
-                return pr(t, e.userId, s).next((() => {}));
-            }))));
-        }))));
-    }
-    /**
-     * Ensures that every document in the remote document cache has a corresponding sentinel row
-     * with a sequence number. Missing rows are given the most recently used sequence number.
-     */    Wn(t) {
-        const e = t.store("targetDocuments"), n = t.store("remoteDocuments");
-        return t.store("targetGlobal").get("targetGlobalKey").next((t => {
-            const s = [];
-            return n.Wt(((n, i) => {
-                const r = new _t(n), o = function(t) {
-                    return [ 0, Qs(t) ];
-                }(r);
-                s.push(e.get(o).next((n => n ? pi.resolve() : (n => e.put({
-                    targetId: 0,
-                    path: Qs(n),
-                    sequenceNumber: t.highestListenSequenceNumber
-                }))(r))));
-            })).next((() => pi.waitFor(s)));
-        }));
-    }
-    zn(t, e) {
-        // Create the index.
-        t.createObjectStore("collectionParents", {
-            keyPath: ri
-        });
-        const n = e.store("collectionParents"), s = new hr, i = t => {
-            if (s.add(t)) {
-                const e = t.lastSegment(), s = t.popLast();
-                return n.put({
-                    collectionId: e,
-                    parent: Qs(s)
                 });
             }
-        };
-        // Helper to add an index entry iff we haven't already written it.
-                // Index existing remote documents.
-        return e.store("remoteDocuments").Wt({
-            jt: !0
-        }, ((t, e) => {
-            const n = new _t(t);
-            return i(n.popLast());
-        })).next((() => e.store("documentMutations").Wt({
-            jt: !0
-        }, (([t, e, n], s) => {
-            const r = zs(e);
-            return i(r.popLast());
-        }))));
-    }
-    Hn(t) {
-        const e = t.store("targets");
-        return e.Wt(((t, n) => {
-            const s = qi(n), i = Ki(this.M, s);
-            return e.put(i);
-        }));
-    }
-    Jn(t, e) {
-        const n = e.store("remoteDocuments"), s = [];
-        return n.Wt(((t, n) => {
-            const i = e.store("remoteDocumentsV14"), r = (o = n, o.document ? new xt(_t.fromString(o.document.name).popFirst(5)) : o.noDocument ? xt.fromSegments(o.noDocument.path) : o.unknownDocument ? xt.fromSegments(o.unknownDocument.path) : L()).path.toArray();
-            var o;
             /**
  * @license
  * Copyright 2017 Google LLC
@@ -12613,36 +12110,115 @@ class jr {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */            const u = {
-                prefixPath: r.slice(0, r.length - 2),
-                collectionGroup: r[r.length - 2],
-                documentId: r[r.length - 1],
-                readTime: n.readTime || [ 0, 0 ],
-                unknownDocument: n.unknownDocument,
-                noDocument: n.noDocument,
-                document: n.document,
-                hasCommittedMutations: !!n.hasCommittedMutations
-            };
-            s.push(i.put(u));
-        })).next((() => pi.waitFor(s)));
+ */ (t);
+        }))), n < 13 && s >= 13 && (r = r.next((() => {
+            !function(t) {
+                t.createObjectStore(zs.store, {
+                    keyPath: zs.keyPath,
+                    autoIncrement: !0
+                }).createIndex(zs.collectionGroupIndex, zs.collectionGroupIndexPath, {
+                    unique: !1
+                });
+                t.createObjectStore(Hs.store, {
+                    keyPath: Hs.keyPath
+                }).createIndex(Hs.sequenceNumberIndex, Hs.sequenceNumberIndexPath, {
+                    unique: !1
+                });
+                t.createObjectStore(Js.store, {
+                    keyPath: Js.keyPath
+                }).createIndex(Js.documentKeyIndex, Js.documentKeyIndexPath, {
+                    unique: !1
+                });
+            }(t);
+        }))), r;
+    }
+    Pn(t) {
+        let e = 0;
+        return t.store(Bs.store).Qt(((t, n) => {
+            e += sr(n);
+        })).next((() => {
+            const n = new Ls(e);
+            return t.store(Ls.store).put(Ls.key, n);
+        }));
+    }
+    Rn(t) {
+        const e = t.store(ks.store), n = t.store(Os.store);
+        return e.qt().next((e => si.forEach(e, (e => {
+            const s = IDBKeyRange.bound([ e.userId, -1 ], [ e.userId, e.lastAcknowledgedBatchId ]);
+            return n.qt(Os.userMutationsIndex, s).next((n => si.forEach(n, (n => {
+                U(n.userId === e.userId);
+                const s = bi(this.O, n);
+                return nr(t, e.userId, s).next((() => {}));
+            }))));
+        }))));
+    }
+    /**
+     * Ensures that every document in the remote document cache has a corresponding sentinel row
+     * with a sequence number. Missing rows are given the most recently used sequence number.
+     */    bn(t) {
+        const e = t.store(qs.store), n = t.store(Bs.store);
+        return t.store(Ks.store).get(Ks.key).next((t => {
+            const s = [];
+            return n.Qt(((n, i) => {
+                const r = new _t(n), o = function(t) {
+                    return [ 0, Vs(t) ];
+                }(r);
+                s.push(e.get(o).next((n => n ? si.resolve() : (n => e.put(new qs(0, Vs(n), t.highestListenSequenceNumber)))(r))));
+            })).next((() => si.waitFor(s)));
+        }));
+    }
+    vn(t, e) {
+        // Create the index.
+        t.createObjectStore(Gs.store, {
+            keyPath: Gs.keyPath
+        });
+        const n = e.store(Gs.store), s = new zi, i = t => {
+            if (s.add(t)) {
+                const e = t.lastSegment(), s = t.popLast();
+                return n.put({
+                    collectionId: e,
+                    parent: Vs(s)
+                });
+            }
+        };
+        // Helper to add an index entry iff we haven't already written it.
+                // Index existing remote documents.
+        return e.store(Bs.store).Qt({
+            jt: !0
+        }, ((t, e) => {
+            const n = new _t(t);
+            return i(n.popLast());
+        })).next((() => e.store(Ms.store).Qt({
+            jt: !0
+        }, (([t, e, n], s) => {
+            const r = Cs(e);
+            return i(r.popLast());
+        }))));
+    }
+    Vn(t) {
+        const e = t.store(Us.store);
+        return e.Qt(((t, n) => {
+            const s = vi(n), i = Vi(this.O, s);
+            return e.put(i);
+        }));
     }
 }
 
-function Wr(t) {
-    t.createObjectStore("targetDocuments", {
-        keyPath: si
-    }).createIndex("documentTargetsIndex", ii, {
+function Sr(t) {
+    t.createObjectStore(qs.store, {
+        keyPath: qs.keyPath
+    }).createIndex(qs.documentTargetsIndex, qs.documentTargetsKeyPath, {
         unique: !0
     });
     // NOTE: This is unique only because the TargetId is the suffix.
-    t.createObjectStore("targets", {
-        keyPath: "targetId"
-    }).createIndex("queryTargetsIndex", ni, {
+    t.createObjectStore(Us.store, {
+        keyPath: Us.keyPath
+    }).createIndex(Us.queryTargetsIndexName, Us.queryTargetsKeyPath, {
         unique: !0
-    }), t.createObjectStore("targetGlobal");
+    }), t.createObjectStore(Ks.store);
 }
 
-const zr = "Failed to obtain exclusive access to the persistence layer. To allow shared access, multi-tab synchronization has to be enabled in all tabs. If you are using `experimentalForceOwningTab:true`, make sure that only one tab has persistence enabled at any given time.";
+const Dr = "Failed to obtain exclusive access to the persistence layer. To allow shared access, multi-tab synchronization has to be enabled in all tabs. If you are using `experimentalForceOwningTab:true`, make sure that only one tab has persistence enabled at any given time.";
 
 /**
  * Oldest acceptable age in milliseconds for client metadata before the client
@@ -12694,37 +12270,43 @@ const zr = "Failed to obtain exclusive access to the persistence layer. To allow
  * TODO(b/114226234): Remove `synchronizeTabs` section when multi-tab is no
  * longer optional.
  */
-class Hr {
+class Cr {
     constructor(
     /**
      * Whether to synchronize the in-memory state of multiple tabs and share
      * access to local persistence.
      */
-    t, e, n, s, i, r, o, u, a, 
+    t, e, n, s, i, r, o, c, u, 
     /**
      * If set to true, forcefully obtains database access. Existing tabs will
      * no longer be able to access IndexedDB.
      */
-    c, h = 13) {
+    a, h = 12) {
         if (this.allowTabSynchronization = t, this.persistenceKey = e, this.clientId = n, 
-        this.Yn = i, this.window = r, this.document = o, this.Xn = a, this.Zn = c, this.ts = h, 
-        this.es = null, this.ns = !1, this.isPrimary = !1, this.networkEnabled = !0, 
+        this.Sn = i, this.window = r, this.document = o, this.Dn = u, this.Cn = a, this.schemaVersion = h, 
+        this.Nn = null, this.xn = !1, this.isPrimary = !1, this.networkEnabled = !0, 
         /** Our window.unload handler, if registered. */
-        this.ss = null, this.inForeground = !1, 
+        this.kn = null, this.inForeground = !1, 
         /** Our 'visibilitychange' listener if registered. */
-        this.rs = null, 
+        this.On = null, 
         /** The client metadata refresh task. */
-        this.os = null, 
+        this.Mn = null, 
         /** The last time we garbage collected the client metadata object store. */
-        this.us = Number.NEGATIVE_INFINITY, 
+        this.$n = Number.NEGATIVE_INFINITY, 
         /** A listener to notify on primary state changes. */
-        this.cs = t => Promise.resolve(), !Hr.vt()) throw new Q(G.UNIMPLEMENTED, "This platform is either missing IndexedDB or is known to have an incomplete implementation. Offline persistence has been disabled.");
-        this.referenceDelegate = new Or(this, s), this.hs = e + "main", this.M = new Mi(u), 
-        this.ls = new Ti(this.hs, this.ts, new jr(this.M)), this.fs = new Vr(this.referenceDelegate, this.M), 
-        this.ds = function(t) {
-            return new Br(t);
-        }(this.M), this._s = new Wi, this.window && this.window.localStorage ? this.ws = this.window.localStorage : (this.ws = null, 
-        !1 === c && F("IndexedDbPersistence", "LocalStorage is unavailable. As a result, persistence may not work reliably. In particular enablePersistence() could fail immediately after refreshing the page."));
+        this.Fn = t => Promise.resolve(), !Cr.Vt()) throw new j(G.UNIMPLEMENTED, "This platform is either missing IndexedDB or is known to have an incomplete implementation. Offline persistence has been disabled.");
+        this.referenceDelegate = new pr(this, s), this.Bn = e + "main", this.O = new pi(c), 
+        this.Ln = new ri(this.Bn, this.schemaVersion, new Vr(this.O)), this.Un = new hr(this.referenceDelegate, this.O), 
+        this.qn = function(t) {
+            return new Ar(t);
+        }
+        /**
+ * Returns the set of documents that have changed since the specified read
+ * time.
+ */
+        // PORTING NOTE: This is only used for multi-tab synchronization.
+        (this.O), this.Kn = new Ni, this.window && this.window.localStorage ? this.Gn = this.window.localStorage : (this.Gn = null, 
+        !1 === a && $("IndexedDbPersistence", "LocalStorage is unavailable. As a result, persistence may not work reliably. In particular enablePersistence() could fail immediately after refreshing the page."));
     }
     /**
      * Attempt to start IndexedDb persistence.
@@ -12734,17 +12316,17 @@ class Hr {
         // NOTE: This is expected to fail sometimes (in the case of another tab
         // already having the persistence lock), so it's the first thing we should
         // do.
-        return this.gs().then((() => {
+        return this.jn().then((() => {
             if (!this.isPrimary && !this.allowTabSynchronization) 
             // Fail `start()` if `synchronizeTabs` is disabled and we cannot
             // obtain the primary lease.
-            throw new Q(G.FAILED_PRECONDITION, zr);
-            return this.ys(), this.ps(), this.Is(), this.runTransaction("getHighestListenSequenceNumber", "readonly", (t => this.fs.getHighestSequenceNumber(t)));
+            throw new j(G.FAILED_PRECONDITION, Dr);
+            return this.Qn(), this.Wn(), this.zn(), this.runTransaction("getHighestListenSequenceNumber", "readonly", (t => this.Un.getHighestSequenceNumber(t)));
         })).then((t => {
-            this.es = new nt(t, this.Xn);
+            this.Nn = new nt(t, this.Dn);
         })).then((() => {
-            this.ns = !0;
-        })).catch((t => (this.ls && this.ls.close(), Promise.reject(t))));
+            this.xn = !0;
+        })).catch((t => (this.Ln && this.Ln.close(), Promise.reject(t))));
     }
     /**
      * Registers a listener that gets called when the primary state of the
@@ -12752,8 +12334,8 @@ class Hr {
      * with the current primary state.
      *
      * PORTING NOTE: This is only used for Web multi-tab.
-     */    Ts(t) {
-        return this.cs = async e => {
+     */    Hn(t) {
+        return this.Fn = async e => {
             if (this.started) return t(e);
         }, t(this.isPrimary);
     }
@@ -12763,7 +12345,7 @@ class Hr {
      *
      * PORTING NOTE: This is only used for Web multi-tab.
      */    setDatabaseDeletedListener(t) {
-        this.ls.Ot((async e => {
+        this.Ln.Mt((async e => {
             // Check if an attempt is made to delete IndexedDB.
             null === e.newVersion && await t();
         }));
@@ -12777,8 +12359,8 @@ class Hr {
         this.networkEnabled !== t && (this.networkEnabled = t, 
         // Schedule a primary lease refresh for immediate execution. The eventual
         // lease update will be propagated via `primaryStateListener`.
-        this.Yn.enqueueAndForget((async () => {
-            this.started && await this.gs();
+        this.Sn.enqueueAndForget((async () => {
+            this.started && await this.jn();
         })));
     }
     /**
@@ -12786,47 +12368,42 @@ class Hr {
      * extend the primary lease for the local client. Asynchronously notifies the
      * primary state listener if the client either newly obtained or released its
      * primary lease.
-     */    gs() {
-        return this.runTransaction("updateClientMetadataAndTryBecomePrimary", "readwrite", (t => Yr(t).put({
-            clientId: this.clientId,
-            updateTimeMs: Date.now(),
-            networkEnabled: this.networkEnabled,
-            inForeground: this.inForeground
-        }).next((() => {
-            if (this.isPrimary) return this.Es(t).next((t => {
-                t || (this.isPrimary = !1, this.Yn.enqueueRetryable((() => this.cs(!1))));
+     */    jn() {
+        return this.runTransaction("updateClientMetadataAndTryBecomePrimary", "readwrite", (t => xr(t).put(new js(this.clientId, Date.now(), this.networkEnabled, this.inForeground)).next((() => {
+            if (this.isPrimary) return this.Jn(t).next((t => {
+                t || (this.isPrimary = !1, this.Sn.enqueueRetryable((() => this.Fn(!1))));
             }));
-        })).next((() => this.As(t))).next((e => this.isPrimary && !e ? this.Rs(t).next((() => !1)) : !!e && this.Ps(t).next((() => !0)))))).catch((t => {
-            if (Ri(t)) 
+        })).next((() => this.Yn(t))).next((e => this.isPrimary && !e ? this.Xn(t).next((() => !1)) : !!e && this.Zn(t).next((() => !0)))))).catch((t => {
+            if (ui(t)) 
             // Proceed with the existing state. Any subsequent access to
             // IndexedDB will verify the lease.
-            return O("IndexedDbPersistence", "Failed to extend owner lease: ", t), this.isPrimary;
+            return M("IndexedDbPersistence", "Failed to extend owner lease: ", t), this.isPrimary;
             if (!this.allowTabSynchronization) throw t;
-            return O("IndexedDbPersistence", "Releasing owner lease after error during lease refresh", t), 
+            return M("IndexedDbPersistence", "Releasing owner lease after error during lease refresh", t), 
             /* isPrimary= */ !1;
         })).then((t => {
-            this.isPrimary !== t && this.Yn.enqueueRetryable((() => this.cs(t))), this.isPrimary = t;
+            this.isPrimary !== t && this.Sn.enqueueRetryable((() => this.Fn(t))), this.isPrimary = t;
         }));
     }
-    Es(t) {
-        return Jr(t).get("owner").next((t => pi.resolve(this.bs(t))));
+    Jn(t) {
+        return Nr(t).get(xs.key).next((t => si.resolve(this.ts(t))));
     }
-    Vs(t) {
-        return Yr(t).delete(this.clientId);
+    es(t) {
+        return xr(t).delete(this.clientId);
     }
     /**
      * If the garbage collection threshold has passed, prunes the
      * RemoteDocumentChanges and the ClientMetadata store based on the last update
      * time of all clients.
-     */    async vs() {
-        if (this.isPrimary && !this.Ss(this.us, 18e5)) {
-            this.us = Date.now();
+     */    async ns() {
+        if (this.isPrimary && !this.ss(this.$n, 18e5)) {
+            this.$n = Date.now();
             const t = await this.runTransaction("maybeGarbageCollectMultiClientState", "readwrite-primary", (t => {
-                const e = Di(t, "clientMetadata");
+                const e = _i(t, js.store);
                 return e.qt().next((t => {
-                    const n = this.Ds(t, 18e5), s = t.filter((t => -1 === n.indexOf(t)));
+                    const n = this.rs(t, 18e5), s = t.filter((t => -1 === n.indexOf(t)));
                     // Delete metadata for clients that are no longer considered active.
-                    return pi.forEach(s, (t => e.delete(t.clientId))).next((() => s));
+                    return si.forEach(s, (t => e.delete(t.clientId))).next((() => s));
                 }));
             })).catch((() => []));
             // Delete potential leftover entries that may continue to mark the
@@ -12834,16 +12411,16 @@ class Hr {
             // Ideally we'd delete the IndexedDb and LocalStorage zombie entries for
             // the client atomically, but we can't. So we opt to delete the IndexedDb
             // entries first to avoid potentially reviving a zombied client.
-                        if (this.ws) for (const e of t) this.ws.removeItem(this.Cs(e.clientId));
+                        if (this.Gn) for (const e of t) this.Gn.removeItem(this.os(e.clientId));
         }
     }
     /**
      * Schedules a recurring timer to update the client metadata and to either
      * extend or acquire the primary lease if the client is eligible.
-     */    Is() {
-        this.os = this.Yn.enqueueAfterDelay("client_metadata_refresh" /* ClientMetadataRefresh */ , 4e3, (() => this.gs().then((() => this.vs())).then((() => this.Is()))));
+     */    zn() {
+        this.Mn = this.Sn.enqueueAfterDelay("client_metadata_refresh" /* ClientMetadataRefresh */ , 4e3, (() => this.jn().then((() => this.ns())).then((() => this.zn()))));
     }
-    /** Checks whether `client` is the local client. */    bs(t) {
+    /** Checks whether `client` is the local client. */    ts(t) {
         return !!t && t.ownerId === this.clientId;
     }
     /**
@@ -12852,9 +12429,9 @@ class Hr {
      * the client is eligible for the lease, but does not actually acquire it.
      * May return 'false' even if there is no active leaseholder and another
      * (foreground) client should become leaseholder instead.
-     */    As(t) {
-        if (this.Zn) return pi.resolve(!0);
-        return Jr(t).get("owner").next((e => {
+     */    Yn(t) {
+        if (this.Cn) return si.resolve(!0);
+        return Nr(t).get(xs.key).next((e => {
             // A client is eligible for the primary lease if:
             // - its network is enabled and the client's tab is in the foreground.
             // - its network is enabled and no other client's tab is in the
@@ -12864,9 +12441,9 @@ class Hr {
             // - every clients network is disabled and no other client's tab is in
             //   the foreground.
             // - the `forceOwningTab` setting was passed in.
-            if (null !== e && this.Ss(e.leaseTimestampMs, 5e3) && !this.xs(e.ownerId)) {
-                if (this.bs(e) && this.networkEnabled) return !0;
-                if (!this.bs(e)) {
+            if (null !== e && this.ss(e.leaseTimestampMs, 5e3) && !this.cs(e.ownerId)) {
+                if (this.ts(e) && this.networkEnabled) return !0;
+                if (!this.ts(e)) {
                     if (!e.allowTabSynchronization) 
                     // Fail the `canActAsPrimary` check if the current leaseholder has
                     // not opted into multi-tab synchronization. If this happens at
@@ -12879,40 +12456,40 @@ class Hr {
                     // settings is not supported.
                     // TODO(b/114226234): Remove this check when `synchronizeTabs` can
                     // no longer be turned off.
-                    throw new Q(G.FAILED_PRECONDITION, zr);
+                    throw new j(G.FAILED_PRECONDITION, Dr);
                     return !1;
                 }
             }
-            return !(!this.networkEnabled || !this.inForeground) || Yr(t).qt().next((t => void 0 === this.Ds(t, 5e3).find((t => {
+            return !(!this.networkEnabled || !this.inForeground) || xr(t).qt().next((t => void 0 === this.rs(t, 5e3).find((t => {
                 if (this.clientId !== t.clientId) {
                     const e = !this.networkEnabled && t.networkEnabled, n = !this.inForeground && t.inForeground, s = this.networkEnabled === t.networkEnabled;
                     if (e || n && s) return !0;
                 }
                 return !1;
             }))));
-        })).next((t => (this.isPrimary !== t && O("IndexedDbPersistence", `Client ${t ? "is" : "is not"} eligible for a primary lease.`), 
+        })).next((t => (this.isPrimary !== t && M("IndexedDbPersistence", `Client ${t ? "is" : "is not"} eligible for a primary lease.`), 
         t)));
     }
     async shutdown() {
         // The shutdown() operations are idempotent and can be called even when
         // start() aborted (e.g. because it couldn't acquire the persistence lease).
-        this.ns = !1, this.Ns(), this.os && (this.os.cancel(), this.os = null), this.ks(), 
-        this.Ms(), 
+        this.xn = !1, this.us(), this.Mn && (this.Mn.cancel(), this.Mn = null), this.hs(), 
+        this.ls(), 
         // Use `SimpleDb.runTransaction` directly to avoid failing if another tab
         // has obtained the primary lease.
-        await this.ls.runTransaction("shutdown", "readwrite", [ "owner", "clientMetadata" ], (t => {
-            const e = new Si(t, nt.A);
-            return this.Rs(e).next((() => this.Vs(e)));
-        })), this.ls.close(), 
+        await this.Ln.runTransaction("shutdown", "readwrite", [ xs.store, js.store ], (t => {
+            const e = new di(t, nt.A);
+            return this.Xn(e).next((() => this.es(e)));
+        })), this.Ln.close(), 
         // Remove the entry marking the client as zombied from LocalStorage since
         // we successfully deleted its metadata from IndexedDb.
-        this.Os();
+        this.fs();
     }
     /**
      * Returns clients that are not zombied and have an updateTime within the
      * provided threshold.
-     */    Ds(t, e) {
-        return t.filter((t => this.Ss(t.updateTimeMs, e) && !this.xs(t.clientId)));
+     */    rs(t, e) {
+        return t.filter((t => this.ss(t.updateTimeMs, e) && !this.cs(t.clientId)));
     }
     /**
      * Returns the IDs of the clients that are currently active. If multi-tab
@@ -12920,44 +12497,44 @@ class Hr {
      * ID.
      *
      * PORTING NOTE: This is only used for Web multi-tab.
-     */    Fs() {
-        return this.runTransaction("getActiveClients", "readonly", (t => Yr(t).qt().next((t => this.Ds(t, 18e5).map((t => t.clientId))))));
+     */    ds() {
+        return this.runTransaction("getActiveClients", "readonly", (t => xr(t).qt().next((t => this.rs(t, 18e5).map((t => t.clientId))))));
     }
     get started() {
-        return this.ns;
+        return this.xn;
     }
     getMutationQueue(t, e) {
-        return Tr.Yt(t, this.M, e, this.referenceDelegate);
+        return ir.Jt(t, this.O, e, this.referenceDelegate);
     }
     getTargetCache() {
-        return this.fs;
+        return this.Un;
     }
     getRemoteDocumentCache() {
-        return this.ds;
+        return this.qn;
     }
     getIndexManager(t) {
-        return new fr(t, this.M.Jt.databaseId);
+        return new Hi(t);
     }
     getDocumentOverlayCache(t) {
-        return Ji.Yt(this.M, t);
+        return Oi.Jt(this.O, t);
     }
     getBundleCache() {
-        return this._s;
+        return this.Kn;
     }
     runTransaction(t, e, n) {
-        O("IndexedDbPersistence", "Starting transaction:", t);
-        const s = "readonly" === e ? "readonly" : "readwrite", i = 14 === (r = this.ts) ? mi : 13 === r ? wi : 12 === r ? _i : 11 === r ? di : void L();
+        M("IndexedDbPersistence", "Starting transaction:", t);
+        const s = "readonly" === e ? "readonly" : "readwrite", i = 13 === (r = this.schemaVersion) ? ti : 12 === r ? Zs : 11 === r ? Xs : void L();
         /** Returns the object stores for the provided schema. */
         var r;
         let o;
         // Do all transactions as readwrite against all object stores, since we
         // are the only reader/writer.
-                return this.ls.runTransaction(t, s, i, (s => (o = new Si(s, this.es ? this.es.next() : nt.A), 
-        "readwrite-primary" === e ? this.Es(o).next((t => !!t || this.As(o))).next((e => {
-            if (!e) throw F(`Failed to obtain primary lease for action '${t}'.`), this.isPrimary = !1, 
-            this.Yn.enqueueRetryable((() => this.cs(!1))), new Q(G.FAILED_PRECONDITION, gi);
+                return this.Ln.runTransaction(t, s, i, (s => (o = new di(s, this.Nn ? this.Nn.next() : nt.A), 
+        "readwrite-primary" === e ? this.Jn(o).next((t => !!t || this.Yn(o))).next((e => {
+            if (!e) throw $(`Failed to obtain primary lease for action '${t}'.`), this.isPrimary = !1, 
+            this.Sn.enqueueRetryable((() => this.Fn(!1))), new j(G.FAILED_PRECONDITION, ei);
             return n(o);
-        })).next((t => this.Ps(o).next((() => t)))) : this.$s(o).next((() => n(o)))))).then((t => (o.raiseOnCommittedEvent(), 
+        })).next((t => this.Zn(o).next((() => t)))) : this._s(o).next((() => n(o)))))).then((t => (o.raiseOnCommittedEvent(), 
         t)));
     }
     /**
@@ -12966,43 +12543,39 @@ class Hr {
      */
     // TODO(b/114226234): Remove this check when `synchronizeTabs` can no longer
     // be turned off.
-    $s(t) {
-        return Jr(t).get("owner").next((t => {
-            if (null !== t && this.Ss(t.leaseTimestampMs, 5e3) && !this.xs(t.ownerId) && !this.bs(t) && !(this.Zn || this.allowTabSynchronization && t.allowTabSynchronization)) throw new Q(G.FAILED_PRECONDITION, zr);
+    _s(t) {
+        return Nr(t).get(xs.key).next((t => {
+            if (null !== t && this.ss(t.leaseTimestampMs, 5e3) && !this.cs(t.ownerId) && !this.ts(t) && !(this.Cn || this.allowTabSynchronization && t.allowTabSynchronization)) throw new j(G.FAILED_PRECONDITION, Dr);
         }));
     }
     /**
      * Obtains or extends the new primary lease for the local client. This
      * method does not verify that the client is eligible for this lease.
-     */    Ps(t) {
-        const e = {
-            ownerId: this.clientId,
-            allowTabSynchronization: this.allowTabSynchronization,
-            leaseTimestampMs: Date.now()
-        };
-        return Jr(t).put("owner", e);
+     */    Zn(t) {
+        const e = new xs(this.clientId, this.allowTabSynchronization, Date.now());
+        return Nr(t).put(xs.key, e);
     }
-    static vt() {
-        return Ti.vt();
+    static Vt() {
+        return ri.Vt();
     }
-    /** Checks the primary lease and removes it if we are the current primary. */    Rs(t) {
-        const e = Jr(t);
-        return e.get("owner").next((t => this.bs(t) ? (O("IndexedDbPersistence", "Releasing primary lease."), 
-        e.delete("owner")) : pi.resolve()));
+    /** Checks the primary lease and removes it if we are the current primary. */    Xn(t) {
+        const e = Nr(t);
+        return e.get(xs.key).next((t => this.ts(t) ? (M("IndexedDbPersistence", "Releasing primary lease."), 
+        e.delete(xs.key)) : si.resolve()));
     }
-    /** Verifies that `updateTimeMs` is within `maxAgeMs`. */    Ss(t, e) {
+    /** Verifies that `updateTimeMs` is within `maxAgeMs`. */    ss(t, e) {
         const n = Date.now();
-        return !(t < n - e) && (!(t > n) || (F(`Detected an update time that is in the future: ${t} > ${n}`), 
+        return !(t < n - e) && (!(t > n) || ($(`Detected an update time that is in the future: ${t} > ${n}`), 
         !1));
     }
-    ys() {
-        null !== this.document && "function" == typeof this.document.addEventListener && (this.rs = () => {
-            this.Yn.enqueueAndForget((() => (this.inForeground = "visible" === this.document.visibilityState, 
-            this.gs())));
-        }, this.document.addEventListener("visibilitychange", this.rs), this.inForeground = "visible" === this.document.visibilityState);
+    Qn() {
+        null !== this.document && "function" == typeof this.document.addEventListener && (this.On = () => {
+            this.Sn.enqueueAndForget((() => (this.inForeground = "visible" === this.document.visibilityState, 
+            this.jn())));
+        }, this.document.addEventListener("visibilitychange", this.On), this.inForeground = "visible" === this.document.visibilityState);
     }
-    ks() {
-        this.rs && (this.document.removeEventListener("visibilitychange", this.rs), this.rs = null);
+    hs() {
+        this.On && (this.document.removeEventListener("visibilitychange", this.On), this.On = null);
     }
     /**
      * Attaches a window.unload handler that will synchronously write our
@@ -13013,77 +12586,77 @@ class Hr {
      * primary lease). LocalStorage is used for this rather than IndexedDb because
      * it is a synchronous API and so can be used reliably from  an unload
      * handler.
-     */    ps() {
+     */    Wn() {
         var t;
-        "function" == typeof (null === (t = this.window) || void 0 === t ? void 0 : t.addEventListener) && (this.ss = () => {
+        "function" == typeof (null === (t = this.window) || void 0 === t ? void 0 : t.addEventListener) && (this.kn = () => {
             // Note: In theory, this should be scheduled on the AsyncQueue since it
             // accesses internal state. We execute this code directly during shutdown
             // to make sure it gets a chance to run.
-            this.Ns(), Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isSafari"])() && navigator.appVersion.match(/Version\/1[45]/) && 
+            this.us(), Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isSafari"])() && navigator.appVersion.match(/Version\/1[45]/) && 
             // On Safari 14 and 15, we do not run any cleanup actions as it might
             // trigger a bug that prevents Safari from re-opening IndexedDB during
             // the next page load.
             // See https://bugs.webkit.org/show_bug.cgi?id=226547
-            this.Yn.enterRestrictedMode(/* purgeExistingTasks= */ !0), this.Yn.enqueueAndForget((() => this.shutdown()));
-        }, this.window.addEventListener("pagehide", this.ss));
+            this.Sn.enterRestrictedMode(/* purgeExistingTasks= */ !0), this.Sn.enqueueAndForget((() => this.shutdown()));
+        }, this.window.addEventListener("pagehide", this.kn));
     }
-    Ms() {
-        this.ss && (this.window.removeEventListener("pagehide", this.ss), this.ss = null);
+    ls() {
+        this.kn && (this.window.removeEventListener("pagehide", this.kn), this.kn = null);
     }
     /**
      * Returns whether a client is "zombied" based on its LocalStorage entry.
      * Clients become zombied when their tab closes without running all of the
      * cleanup logic in `shutdown()`.
-     */    xs(t) {
+     */    cs(t) {
         var e;
         try {
-            const n = null !== (null === (e = this.ws) || void 0 === e ? void 0 : e.getItem(this.Cs(t)));
-            return O("IndexedDbPersistence", `Client '${t}' ${n ? "is" : "is not"} zombied in LocalStorage`), 
+            const n = null !== (null === (e = this.Gn) || void 0 === e ? void 0 : e.getItem(this.os(t)));
+            return M("IndexedDbPersistence", `Client '${t}' ${n ? "is" : "is not"} zombied in LocalStorage`), 
             n;
         } catch (t) {
             // Gracefully handle if LocalStorage isn't working.
-            return F("IndexedDbPersistence", "Failed to get zombied client id.", t), !1;
+            return $("IndexedDbPersistence", "Failed to get zombied client id.", t), !1;
         }
     }
     /**
      * Record client as zombied (a client that had its tab closed). Zombied
      * clients are ignored during primary tab selection.
-     */    Ns() {
-        if (this.ws) try {
-            this.ws.setItem(this.Cs(this.clientId), String(Date.now()));
+     */    us() {
+        if (this.Gn) try {
+            this.Gn.setItem(this.os(this.clientId), String(Date.now()));
         } catch (t) {
             // Gracefully handle if LocalStorage isn't available / working.
-            F("Failed to set zombie client id.", t);
+            $("Failed to set zombie client id.", t);
         }
     }
-    /** Removes the zombied client entry if it exists. */    Os() {
-        if (this.ws) try {
-            this.ws.removeItem(this.Cs(this.clientId));
+    /** Removes the zombied client entry if it exists. */    fs() {
+        if (this.Gn) try {
+            this.Gn.removeItem(this.os(this.clientId));
         } catch (t) {
             // Ignore
         }
     }
-    Cs(t) {
+    os(t) {
         return `firestore_zombie_${this.persistenceKey}_${t}`;
     }
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the primary client object store.
- */ function Jr(t) {
-    return Di(t, "owner");
+ */ function Nr(t) {
+    return _i(t, xs.store);
 }
 
 /**
  * Helper to get a typed SimpleDbStore for the client metadata object store.
- */ function Yr(t) {
-    return Di(t, "clientMetadata");
+ */ function xr(t) {
+    return _i(t, js.store);
 }
 
 /**
  * Generates a string used as a prefix when storing data in IndexedDB and
  * LocalStorage.
- */ function Xr(t, e) {
+ */ function kr(t, e) {
     // Use two different prefix formats:
     //   * firestore / persistenceKey / projectID . databaseID / ...
     //   * firestore / persistenceKey / projectID / ...
@@ -13091,6 +12664,28 @@ class Hr {
     // so there's no danger of collisions.
     let n = t.projectId;
     return t.isDefaultDatabase || (n += "." + t.database), "firestore/" + e + "/" + n + "/";
+}
+
+/**
+ * @license
+ * Copyright 2020 Google LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *   http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+class Or {
+    constructor(t, e) {
+        this.progress = t, this.ws = e;
+    }
 }
 
 /**
@@ -13114,28 +12709,27 @@ class Hr {
  * have a cached version in remoteDocumentCache or local mutations for the
  * document). The view is computed by applying the mutations in the
  * MutationQueue to the RemoteDocumentCache.
- */
-class Zr {
+ */ class Mr {
     constructor(t, e, n) {
-        this.ds = t, this.Bs = e, this.indexManager = n;
+        this.qn = t, this.gs = e, this.indexManager = n;
     }
     /**
      * Get the local view of the document identified by `key`.
      *
      * @returns Local view of the document or null if we don't have any cached
      * state for it.
-     */    Ls(t, e) {
-        return this.Bs.getAllMutationBatchesAffectingDocumentKey(t, e).next((n => this.Us(t, e, n)));
+     */    ys(t, e) {
+        return this.gs.getAllMutationBatchesAffectingDocumentKey(t, e).next((n => this.ps(t, e, n)));
     }
-    /** Internal version of `getDocument` that allows reusing batches. */    Us(t, e, n) {
-        return this.ds.getEntry(t, e).next((t => {
+    /** Internal version of `getDocument` that allows reusing batches. */    ps(t, e, n) {
+        return this.qn.getEntry(t, e).next((t => {
             for (const e of n) e.applyToLocalView(t);
             return t;
         }));
     }
     // Returns the view of the given `docs` as they would appear after applying
     // all mutations in the given `batches`.
-    qs(t, e) {
+    Is(t, e) {
         t.forEach(((t, n) => {
             for (const t of e) t.applyToLocalView(n);
         }));
@@ -13145,72 +12739,73 @@ class Zr {
      *
      * If we don't have cached state for a document in `keys`, a NoDocument will
      * be stored for that key in the resulting set.
-     */    Ks(t, e) {
-        return this.ds.getEntries(t, e).next((e => this.Gs(t, e).next((() => e))));
+     */    Es(t, e) {
+        return this.qn.getEntries(t, e).next((e => this.Ts(t, e).next((() => e))));
     }
     /**
      * Applies the local view the given `baseDocs` without retrieving documents
      * from the local store.
-     */    Gs(t, e) {
-        return this.Bs.getAllMutationBatchesAffectingDocumentKeys(t, e).next((t => this.qs(e, t)));
+     */    Ts(t, e) {
+        return this.gs.getAllMutationBatchesAffectingDocumentKeys(t, e).next((t => this.Is(e, t)));
     }
     /**
      * Performs a query against the local view of all documents.
      *
      * @param transaction - The persistence transaction.
      * @param query - The query to match documents against.
-     * @param offset - Read time and key to start scanning by (exclusive).
-     */    Qs(t, e, n) {
+     * @param sinceReadTime - If not set to SnapshotVersion.min(), return only
+     *     documents that have been read since this snapshot version (exclusive).
+     */    As(t, e, n) {
         /**
  * Returns whether the query matches a single document by path (rather than a
  * collection).
  */
         return function(t) {
-            return xt.isDocumentKey(t.path) && null === t.collectionGroup && 0 === t.filters.length;
-        }(e) ? this.js(t, e.path) : qe(e) ? this.Ws(t, e, n) : this.zs(t, e, n);
+            return Nt.isDocumentKey(t.path) && null === t.collectionGroup && 0 === t.filters.length;
+        }(e) ? this.Rs(t, e.path) : Ve(e) ? this.Ps(t, e, n) : this.bs(t, e, n);
     }
-    js(t, e) {
+    Rs(t, e) {
         // Just do a simple document lookup.
-        return this.Ls(t, new xt(e)).next((t => {
-            let e = zn();
+        return this.ys(t, new Nt(e)).next((t => {
+            let e = Nn();
             return t.isFoundDocument() && (e = e.insert(t.key, t)), e;
         }));
     }
-    Ws(t, e, n) {
+    Ps(t, e, n) {
         const s = e.collectionGroup;
-        let i = zn();
-        return this.indexManager.getCollectionParents(t, s).next((r => pi.forEach(r, (r => {
+        let i = Nn();
+        return this.indexManager.getCollectionParents(t, s).next((r => si.forEach(r, (r => {
             const o = function(t, e) {
-                return new Me(e, 
+                return new Ee(e, 
                 /*collectionGroup=*/ null, t.explicitOrderBy.slice(), t.filters.slice(), t.limit, t.limitType, t.startAt, t.endAt);
             }
             /**
  * Returns true if this query does not specify any query constraints that
  * could remove results.
  */ (e, r.child(s));
-            return this.zs(t, o, n).next((t => {
+            return this.bs(t, o, n).next((t => {
                 t.forEach(((t, e) => {
                     i = i.insert(t, e);
                 }));
             }));
         })).next((() => i))));
     }
-    zs(t, e, n) {
+    bs(t, e, n) {
         // Query the remote documents and overlay mutations.
         let s;
-        return this.ds.getAllFromCollection(t, e.path, n).next((n => (s = n, this.Bs.getAllMutationBatchesAffectingQuery(t, e)))).next((t => {
+        return this.qn.getAll(t, e.path, n).next((n => (s = n, this.gs.getAllMutationBatchesAffectingQuery(t, e)))).next((t => {
             for (const e of t) for (const t of e.mutations) {
                 const n = t.key;
                 let i = s.get(n);
                 null == i && (
                 // Create invalid document to apply mutations on top of
-                i = ne.newInvalidDocument(n), s = s.insert(n, i)), En(t, i, e.localWriteTime), i.isFoundDocument() || (s = s.remove(n));
+                i = Jt.newInvalidDocument(n), s = s.insert(n, i)), cn(t, i, e.localWriteTime), i.isFoundDocument() || (s = s.remove(n));
             }
         })).next((() => (
         // Finally, filter out any documents that don't actually match
         // the query.
         s.forEach(((t, n) => {
-            He(e, n) || (s = s.remove(t));
+            Oe(e, n) || (s = s.remove(t));
         })), s)));
     }
 }
@@ -13235,12 +12830,12 @@ class Zr {
  * A set of changes to what documents are currently in view and out of view for
  * a given query. These changes are sent to the LocalStore by the View (via
  * the SyncEngine) and are used to pin / unpin documents as appropriate.
- */ class to {
+ */ class $r {
     constructor(t, e, n, s) {
-        this.targetId = t, this.fromCache = e, this.Hs = n, this.Js = s;
+        this.targetId = t, this.fromCache = e, this.vs = n, this.Vs = s;
     }
-    static Ys(t, e) {
-        let n = Xn(), s = Xn();
+    static Ss(t, e) {
+        let n = On(), s = On();
         for (const t of e.docChanges) switch (t.type) {
           case 0 /* Added */ :
             n = n.add(t.doc.key);
@@ -13250,7 +12845,7 @@ class Zr {
             s = s.add(t.doc.key);
  // do nothing
                 }
-        return new to(t, e.fromCache, n, s);
+        return new $r(t, e.fromCache, n, s);
     }
 }
 
@@ -13287,21 +12882,21 @@ class Zr {
  *   another document that is in the local cache.
  *
  * - Queries that have never been CURRENT or free of limbo documents.
- */ class eo {
+ */ class Fr {
     /** Sets the document view to query against. */
-    Xs(t) {
-        this.Zs = t;
+    Ds(t) {
+        this.Cs = t;
     }
-    /** Returns all local documents matching the specified query. */    Qs(t, e, n, s) {
+    /** Returns all local documents matching the specified query. */    As(t, e, n, s) {
         // Queries that match all documents don't benefit from using
         // key-based lookups. It is more efficient to scan all documents in a
         // collection, rather than to perform individual lookups.
         return function(t) {
             return 0 === t.filters.length && null === t.limit && null == t.startAt && null == t.endAt && (0 === t.explicitOrderBy.length || 1 === t.explicitOrderBy.length && t.explicitOrderBy[0].field.isKeyField());
-        }(e) || n.isEqual(ct.min()) ? this.ti(t, e) : this.Zs.Ks(t, s).next((i => {
-            const r = this.ei(e, i);
-            return ($e(e) || Be(e)) && this.ni(e.limitType, r, s, n) ? this.ti(t, e) : (k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG && O("QueryEngine", "Re-using previous result from %s to execute query: %s", n.toString(), ze(e)), 
-            this.Zs.Qs(t, e, ae(n, -1)).next((t => (
+        }(e) || n.isEqual(at.min()) ? this.Ns(t, e) : this.Cs.Es(t, s).next((i => {
+            const r = this.xs(e, i);
+            return (Re(e) || Pe(e)) && this.ks(e.limitType, r, s, n) ? this.Ns(t, e) : (k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG && M("QueryEngine", "Re-using previous result from %s to execute query: %s", n.toString(), ke(e)), 
+            this.Cs.As(t, e, n).next((t => (
             // We merge `previousResults` into `updateResults`, since
             // `updateResults` is already a DocumentMap. If a document is
             // contained in both lists, then its contents are the same.
@@ -13312,12 +12907,12 @@ class Zr {
         // Queries that have never seen a snapshot without limbo free documents
         // should also be run as a full collection scan.
         }
-    /** Applies the query filter and sorting to the provided documents.  */    ei(t, e) {
+    /** Applies the query filter and sorting to the provided documents.  */    xs(t, e) {
         // Sort the documents and re-apply the query filter since previously
         // matching documents do not necessarily still match the query.
-        let n = new qn(Ye(t));
+        let n = new bn(Me(t));
         return e.forEach(((e, s) => {
-            He(t, s) && (n = n.add(s));
+            Oe(t, s) && (n = n.add(s));
         })), n;
     }
     /**
@@ -13330,7 +12925,7 @@ class Zr {
      * snapshot.
      * @param limboFreeSnapshotVersion - The version of the snapshot when the
      * query was last synchronized.
-     */    ni(t, e, n, s) {
+     */    ks(t, e, n, s) {
         // The query needs to be refilled if a previously matching document no
         // longer matches.
         if (n.size !== e.size) return !0;
@@ -13345,9 +12940,9 @@ class Zr {
                 const i = "F" /* First */ === t ? e.last() : e.first();
         return !!i && (i.hasPendingWrites || i.version.compareTo(s) > 0);
     }
-    ti(t, e) {
-        return k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG && O("QueryEngine", "Using full collection scan to execute query:", ze(e)), 
-        this.Zs.Qs(t, e, he.min());
+    Ns(t, e) {
+        return k() <= _firebase_logger__WEBPACK_IMPORTED_MODULE_2__["LogLevel"].DEBUG && M("QueryEngine", "Using full collection scan to execute query:", ke(e)), 
+        this.Cs.As(t, e, at.min());
     }
 }
 
@@ -13375,46 +12970,45 @@ class Zr {
  * This is useful to implement optional features (like bundles) in free
  * functions, such that they are tree-shakeable.
  */
-class no {
+class Br {
     constructor(
     /** Manages our in-memory or durable persistence. */
     t, e, n, s) {
-        this.persistence = t, this.si = e, this.M = s, 
+        this.persistence = t, this.Os = e, this.O = s, 
         /**
          * Maps a targetID to data about its target.
          *
          * PORTING NOTE: We are using an immutable data structure on Web to make re-runs
          * of `applyRemoteEvent()` idempotent.
          */
-        this.ii = new Bn(rt), 
+        this.Ms = new An(rt), 
         /** Maps a target to its targetID. */
         // TODO(wuandy): Evaluate if TargetId can be part of Target.
-        this.ri = new $n((t => _e(t)), me), 
+        this.$s = new Er((t => se(t)), re), 
         /**
-         * A per collection group index of the last read time processed by
-         * `getNewDocumentChanges()`.
+         * The read time of the last entry processed by `getNewDocumentChanges()`.
          *
          * PORTING NOTE: This is only used for multi-tab synchronization.
          */
-        this.oi = new Map, this.ui = t.getRemoteDocumentCache(), this.fs = t.getTargetCache(), 
-        this._s = t.getBundleCache(), this.ai(n);
+        this.Fs = at.min(), this.Bs = t.getRemoteDocumentCache(), this.Un = t.getTargetCache(), 
+        this.Kn = t.getBundleCache(), this.Ls(n);
     }
-    ai(t) {
+    Ls(t) {
         // TODO(indexing): Add spec tests that test these components change after a
         // user change
-        this.indexManager = this.persistence.getIndexManager(t), this.Bs = this.persistence.getMutationQueue(t, this.indexManager), 
-        this.ci = new Zr(this.ui, this.Bs, this.indexManager), this.ui.setIndexManager(this.indexManager), 
-        this.si.Xs(this.ci);
+        this.indexManager = this.persistence.getIndexManager(t), this.gs = this.persistence.getMutationQueue(t, this.indexManager), 
+        this.Us = new Mr(this.Bs, this.gs, this.indexManager), this.Bs.setIndexManager(this.indexManager), 
+        this.Os.Ds(this.Us);
     }
     collectGarbage(t) {
-        return this.persistence.runTransaction("Collect garbage", "readwrite-primary", (e => t.collect(e, this.ii)));
+        return this.persistence.runTransaction("Collect garbage", "readwrite-primary", (e => t.collect(e, this.Ms)));
     }
 }
 
-function so(
+function Lr(
 /** Manages our in-memory or durable persistence. */
 t, e, n, s) {
-    return new no(t, e, n, s);
+    return new Br(t, e, n, s);
 }
 
 /**
@@ -13425,16 +13019,16 @@ t, e, n, s) {
  */
 // PORTING NOTE: Android and iOS only return the documents affected by the
 // change.
-async function io(t, e) {
+async function Ur(t, e) {
     const n = K(t);
     return await n.persistence.runTransaction("Handle user change", "readonly", (t => {
         // Swap out the mutation queue, grabbing the pending mutation batches
         // before and after.
         let s;
-        return n.Bs.getAllMutationBatches(t).next((i => (s = i, n.ai(e), n.Bs.getAllMutationBatches(t)))).next((e => {
+        return n.gs.getAllMutationBatches(t).next((i => (s = i, n.Ls(e), n.gs.getAllMutationBatches(t)))).next((e => {
             const i = [], r = [];
             // Union the old/new changed keys.
-            let o = Xn();
+            let o = On();
             for (const t of s) {
                 i.push(t.batchId);
                 for (const e of t.mutations) o = o.add(e.key);
@@ -13445,8 +13039,8 @@ async function io(t, e) {
             }
             // Return the set of all (potentially) changed documents and the list
             // of mutation batch IDs that were affected by change.
-                        return n.ci.Ks(t, o).next((t => ({
-                hi: t,
+                        return n.Us.Es(t, o).next((t => ({
+                qs: t,
                 removedBatchIds: i,
                 addedBatchIds: r
             })));
@@ -13469,15 +13063,15 @@ async function io(t, e) {
  *
  * @returns The resulting (modified) documents.
  */
-function ro(t, e) {
+function qr(t, e) {
     const n = K(t);
     return n.persistence.runTransaction("Acknowledge batch", "readwrite-primary", (t => {
-        const s = e.batch.keys(), i = n.ui.newChangeBuffer({
+        const s = e.batch.keys(), i = n.Bs.newChangeBuffer({
             trackRemovals: !0
         });
         return function(t, e, n, s) {
             const i = n.batch, r = i.keys();
-            let o = pi.resolve();
+            let o = si.resolve();
             return r.forEach((t => {
                 o = o.next((() => s.getEntry(e, t))).next((e => {
                     const r = n.docVersions.get(t);
@@ -13487,11 +13081,11 @@ function ro(t, e) {
                     // for updates that do not modify the underlying document.
                     e.setReadTime(n.commitVersion), s.addEntry(e)));
                 }));
-            })), o.next((() => t.Bs.removeMutationBatch(e, i)));
+            })), o.next((() => t.gs.removeMutationBatch(e, i)));
         }
         /** Returns the local view of the documents affected by a mutation batch. */
         // PORTING NOTE: Multi-Tab only.
-        (n, t, e, i).next((() => i.apply(t))).next((() => n.Bs.performConsistencyCheck(t))).next((() => n.ci.Ks(t, s)));
+        (n, t, e, i).next((() => i.apply(t))).next((() => n.gs.performConsistencyCheck(t))).next((() => n.Us.Es(t, s)));
     }));
 }
 
@@ -13505,9 +13099,9 @@ function ro(t, e) {
  * Returns the last consistent snapshot processed (used by the RemoteStore to
  * determine whether to buffer incoming snapshots from the backend).
  */
-function oo(t) {
+function Kr(t) {
     const e = K(t);
-    return e.persistence.runTransaction("Get last remote snapshot version", "readonly", (t => e.fs.getLastRemoteSnapshotVersion(t)));
+    return e.persistence.runTransaction("Get last remote snapshot version", "readonly", (t => e.Un.getLastRemoteSnapshotVersion(t)));
 }
 
 /**
@@ -13517,26 +13111,26 @@ function oo(t) {
  *
  * LocalDocuments are re-calculated if there are remaining mutations in the
  * queue.
- */ function uo(t, e) {
+ */ function Gr(t, e) {
     const n = K(t), s = e.snapshotVersion;
-    let i = n.ii;
+    let i = n.Ms;
     return n.persistence.runTransaction("Apply remote event", "readwrite-primary", (t => {
-        const r = n.ui.newChangeBuffer({
+        const r = n.Bs.newChangeBuffer({
             trackRemovals: !0
         });
         // Reset newTargetDataByTargetMap in case this transaction gets re-run.
-                i = n.ii;
+                i = n.Ms;
         const o = [];
-        e.targetChanges.forEach(((r, u) => {
-            const a = i.get(u);
-            if (!a) return;
+        e.targetChanges.forEach(((r, c) => {
+            const u = i.get(c);
+            if (!u) return;
             // Only update the remote keys if the target is still active. This
             // ensures that we can persist the updated target data along with
             // the updated assignment.
-                        o.push(n.fs.removeMatchingKeys(t, r.removedDocuments, u).next((() => n.fs.addMatchingKeys(t, r.addedDocuments, u))));
-            let c = a.withSequenceNumber(t.currentSequenceNumber);
-            e.targetMismatches.has(u) ? c = c.withResumeToken(pt.EMPTY_BYTE_STRING, ct.min()).withLastLimboFreeSnapshotVersion(ct.min()) : r.resumeToken.approximateByteSize() > 0 && (c = c.withResumeToken(r.resumeToken, s)), 
-            i = i.insert(u, c), 
+                        o.push(n.Un.removeMatchingKeys(t, r.removedDocuments, c).next((() => n.Un.addMatchingKeys(t, r.addedDocuments, c))));
+            let a = u.withSequenceNumber(t.currentSequenceNumber);
+            e.targetMismatches.has(c) ? a = a.withResumeToken(pt.EMPTY_BYTE_STRING, at.min()).withLastLimboFreeSnapshotVersion(at.min()) : r.resumeToken.approximateByteSize() > 0 && (a = a.withResumeToken(r.resumeToken, s)), 
+            i = i.insert(c, a), 
             // Update the target data if there are target changes (or if
             // sufficient time has passed since the last update).
             /**
@@ -13568,9 +13162,9 @@ function oo(t) {
             }
             /**
  * Notifies local store of the changed views to locally pin documents.
- */ (a, c, r) && o.push(n.fs.updateTargetData(t, c));
+ */ (u, a, r) && o.push(n.Un.updateTargetData(t, a));
         }));
-        let u = jn();
+        let c = Dn();
         // HACK: The only reason we allow a null snapshot version is so that we
         // can synthesize remote events when we get permission denied errors while
         // trying to resolve the state of a locally cached document that is in
@@ -13580,14 +13174,14 @@ function oo(t) {
         })), 
         // Each loop iteration only affects its "own" doc, so it's safe to get all the remote
         // documents in advance in a single call.
-        o.push(ao(t, r, e.documentUpdates).next((t => {
-            u = t;
-        }))), !s.isEqual(ct.min())) {
-            const e = n.fs.getLastRemoteSnapshotVersion(t).next((e => n.fs.setTargetsMetadata(t, t.currentSequenceNumber, s)));
+        o.push(jr(t, r, e.documentUpdates).next((t => {
+            c = t;
+        }))), !s.isEqual(at.min())) {
+            const e = n.Un.getLastRemoteSnapshotVersion(t).next((e => n.Un.setTargetsMetadata(t, t.currentSequenceNumber, s)));
             o.push(e);
         }
-        return pi.waitFor(o).next((() => r.apply(t))).next((() => n.ci.Gs(t, u))).next((() => u));
-    })).then((t => (n.ii = i, t)));
+        return si.waitFor(o).next((() => r.apply(t))).next((() => n.Us.Ts(t, c))).next((() => c));
+    })).then((t => (n.Ms = i, t)));
 }
 
 /**
@@ -13605,22 +13199,22 @@ function oo(t) {
  *
  * Note: this function will use `documentVersions` if it is defined;
  * when it is not defined, resorts to `globalVersion`.
- */ function ao(t, e, n) {
-    let s = Xn();
+ */ function jr(t, e, n) {
+    let s = On();
     return n.forEach((t => s = s.add(t))), e.getEntries(t, s).next((t => {
-        let s = jn();
+        let s = Dn();
         return n.forEach(((n, i) => {
             const r = t.get(n);
             // Note: The order of the steps below is important, since we want
             // to ensure that rejected limbo resolutions (which fabricate
             // NoDocuments with SnapshotVersion.min()) never add documents to
             // cache.
-                        i.isNoDocument() && i.version.isEqual(ct.min()) ? (
+                        i.isNoDocument() && i.version.isEqual(at.min()) ? (
             // NoDocuments with SnapshotVersion.min() are used in manufactured
             // events. We remove these documents from cache since we lost
             // access.
             e.removeEntry(n, i.readTime), s = s.insert(n, i)) : !r.isValidDocument() || i.version.compareTo(r.version) > 0 || 0 === i.version.compareTo(r.version) && r.hasPendingWrites ? (e.addEntry(i), 
-            s = s.insert(n, i)) : O("LocalStore", "Ignoring outdated watch update for ", n, ". Current version:", r.version, " Watch version:", i.version);
+            s = s.insert(n, i)) : M("LocalStore", "Ignoring outdated watch update for ", n, ". Current version:", r.version, " Watch version:", i.version);
         })), s;
     }));
 }
@@ -13631,10 +13225,10 @@ function oo(t) {
  * @param afterBatchId - If provided, the batch to search after.
  * @returns The next mutation or null if there wasn't one.
  */
-function co(t, e) {
+function Qr(t, e) {
     const n = K(t);
     return n.persistence.runTransaction("Get next mutation batch", "readonly", (t => (void 0 === e && (e = -1), 
-    n.Bs.getNextMutationBatchAfterBatchId(t, e))));
+    n.gs.getNextMutationBatchAfterBatchId(t, e))));
 }
 
 /**
@@ -13649,22 +13243,22 @@ function co(t, e) {
  * Allocating an already allocated `Target` will return the existing `TargetData`
  * for that `Target`.
  */
-function ho(t, e) {
+function Wr(t, e) {
     const n = K(t);
     return n.persistence.runTransaction("Allocate target", "readwrite", (t => {
         let s;
-        return n.fs.getTargetData(t, e).next((i => i ? (
+        return n.Un.getTargetData(t, e).next((i => i ? (
         // This target has been listened to previously, so reuse the
         // previous targetID.
         // TODO(mcg): freshen last accessed date?
-        s = i, pi.resolve(s)) : n.fs.allocateTargetId(t).next((i => (s = new ki(e, i, 0 /* Listen */ , t.currentSequenceNumber), 
-        n.fs.addTargetData(t, s).next((() => s)))))));
+        s = i, si.resolve(s)) : n.Un.allocateTargetId(t).next((i => (s = new yi(e, i, 0 /* Listen */ , t.currentSequenceNumber), 
+        n.Un.addTargetData(t, s).next((() => s)))))));
     })).then((t => {
         // If Multi-Tab is enabled, the existing target data may be newer than
         // the in-memory data
-        const s = n.ii.get(t.targetId);
-        return (null === s || t.snapshotVersion.compareTo(s.snapshotVersion) > 0) && (n.ii = n.ii.insert(t.targetId, t), 
-        n.ri.set(e, t.targetId)), t;
+        const s = n.Ms.get(t.targetId);
+        return (null === s || t.snapshotVersion.compareTo(s.snapshotVersion) > 0) && (n.Ms = n.Ms.insert(t.targetId, t), 
+        n.$s.set(e, t.targetId)), t;
     }));
 }
 
@@ -13681,20 +13275,20 @@ function ho(t, e) {
  * Releasing a non-existing `Target` is a no-op.
  */
 // PORTING NOTE: `keepPersistedTargetData` is multi-tab only.
-async function lo(t, e, n) {
-    const s = K(t), i = s.ii.get(e), r = n ? "readwrite" : "readwrite-primary";
+async function zr(t, e, n) {
+    const s = K(t), i = s.Ms.get(e), r = n ? "readwrite" : "readwrite-primary";
     try {
         n || await s.persistence.runTransaction("Release target", r, (t => s.persistence.referenceDelegate.removeTarget(t, i)));
     } catch (t) {
-        if (!Ri(t)) throw t;
+        if (!ui(t)) throw t;
         // All `releaseTarget` does is record the final metadata state for the
         // target, but we've been recording this periodically during target
         // activity. If we lose this write this could cause a very slight
         // difference in the order of target deletion during GC, but we
         // don't define exact LRU semantics so this is acceptable.
-        O("LocalStore", `Failed to update sequence numbers for target ${e}: ${t}`);
+        M("LocalStore", `Failed to update sequence numbers for target ${e}: ${t}`);
     }
-    s.ii = s.ii.remove(e), s.ri.delete(i.target);
+    s.Ms = s.Ms.remove(e), s.$s.delete(i.target);
 }
 
 /**
@@ -13704,27 +13298,26 @@ async function lo(t, e, n) {
  *
  * @param usePreviousResults - Whether results from previous executions can
  * be used to optimize this query execution.
- */ function fo(t, e, n) {
+ */ function Hr(t, e, n) {
     const s = K(t);
-    let i = ct.min(), r = Xn();
+    let i = at.min(), r = On();
     return s.persistence.runTransaction("Execute query", "readonly", (t => function(t, e, n) {
-        const s = K(t), i = s.ri.get(n);
-        return void 0 !== i ? pi.resolve(s.ii.get(i)) : s.fs.getTargetData(e, n);
-    }(s, t, Ge(e)).next((e => {
-        if (e) return i = e.lastLimboFreeSnapshotVersion, s.fs.getMatchingKeysForTargetId(t, e.targetId).next((t => {
+        const s = K(t), i = s.$s.get(n);
+        return void 0 !== i ? si.resolve(s.Ms.get(i)) : s.Un.getTargetData(e, n);
+    }(s, t, De(e)).next((e => {
+        if (e) return i = e.lastLimboFreeSnapshotVersion, s.Un.getMatchingKeysForTargetId(t, e.targetId).next((t => {
             r = t;
         }));
-    })).next((() => s.si.Qs(t, e, n ? i : ct.min(), n ? r : Xn()))).next((t => (mo(s, Je(e), t), 
-    {
+    })).next((() => s.Os.As(t, e, n ? i : at.min(), n ? r : On()))).next((t => ({
         documents: t,
-        li: r
+        Ks: r
     })))));
 }
 
 // PORTING NOTE: Multi-Tab only.
-function _o(t, e) {
-    const n = K(t), s = K(n.fs), i = n.ii.get(e);
-    return i ? Promise.resolve(i.target) : n.persistence.runTransaction("Get target data", "readonly", (t => s.Et(t, e).next((t => t ? t.target : null))));
+function Jr(t, e) {
+    const n = K(t), s = K(n.Un), i = n.Ms.get(e);
+    return i ? Promise.resolve(i.target) : n.persistence.runTransaction("Get target data", "readonly", (t => s.Tt(t, e).next((t => t ? t.target : null))));
 }
 
 /**
@@ -13734,23 +13327,54 @@ function _o(t, e) {
  * since the prior call.
  */
 // PORTING NOTE: Multi-Tab only.
-function wo(t, e) {
-    const n = K(t), s = n.oi.get(e) || ct.min();
-    // Get the current maximum read time for the collection. This should always
-    // exist, but to reduce the chance for regressions we default to
-    // SnapshotVersion.Min()
-    // TODO(indexing): Consider removing the default value.
-        return n.persistence.runTransaction("Get new document changes", "readonly", (t => n.ui.getAllFromCollectionGroup(t, e, ae(s, -1), 
-    /* limit= */ Number.MAX_SAFE_INTEGER))).then((t => (mo(n, e, t), t)));
+function Yr(t) {
+    const e = K(t);
+    return e.persistence.runTransaction("Get new document changes", "readonly", (t => function(t, e, n) {
+        const s = K(t);
+        let i = Dn(), r = Ti(n);
+        const o = br(e), c = IDBKeyRange.lowerBound(r, !0);
+        return o.Qt({
+            index: Bs.readTimeIndex,
+            range: c
+        }, ((t, e) => {
+            // Unlike `getEntry()` and others, `getNewDocumentChanges()` parses
+            // the documents directly since we want to keep sentinel deletes.
+            const n = Ii(s.O, e);
+            i = i.insert(n.key, n), r = e.readTime;
+        })).next((() => ({
+            ws: i,
+            readTime: Ai(r)
+        })));
+    }
+    /**
+ * Returns the read time of the most recently read document in the cache, or
+ * SnapshotVersion.min() if not available.
+ */
+    // PORTING NOTE: This is only used for multi-tab synchronization.
+    (e.Bs, t, e.Fs))).then((({ws: t, readTime: n}) => (e.Fs = n, t)));
 }
 
-/** Sets the collection group's maximum read time from the given documents. */
+/**
+ * Reads the newest document change from persistence and moves the internal
+ * synchronization marker forward so that calls to `getNewDocumentChanges()`
+ * only return changes that happened after client initialization.
+ */
 // PORTING NOTE: Multi-Tab only.
-function mo(t, e, n) {
-    let s = ct.min();
-    n.forEach(((t, e) => {
-        e.readTime.compareTo(s) > 0 && (s = e.readTime);
-    })), t.oi.set(e, s);
+async function Xr(t) {
+    const e = K(t);
+    return e.persistence.runTransaction("Synchronize last document change read time", "readonly", (t => function(t) {
+        const e = br(t);
+        // If there are no existing entries, we return SnapshotVersion.min().
+                let n = at.min();
+        return e.Qt({
+            index: Bs.readTimeIndex,
+            reverse: !0
+        }, ((t, e, s) => {
+            e.readTime && (n = Ai(e.readTime)), s.done();
+        })).next((() => n));
+    }(t))).then((t => {
+        e.Fs = t;
+    }));
 }
 
 /**
@@ -13766,26 +13390,26 @@ function mo(t, e, n) {
  * LocalDocuments are re-calculated if there are remaining mutations in the
  * queue.
  */
-async function go(t, e, n, s) {
+async function Zr(t, e, n, s) {
     const i = K(t);
-    let r = Xn(), o = jn();
+    let r = On(), o = Dn();
     for (const t of n) {
-        const n = e.fi(t.metadata.name);
+        const n = e.Gs(t.metadata.name);
         t.document && (r = r.add(n));
-        const s = e.di(t);
-        s.setReadTime(e._i(t.metadata.readTime)), o = o.insert(n, s);
+        const s = e.js(t);
+        s.setReadTime(e.Qs(t.metadata.readTime)), o = o.insert(n, s);
     }
-    const u = i.ui.newChangeBuffer({
+    const c = i.Bs.newChangeBuffer({
         trackRemovals: !0
-    }), a = await ho(i, function(t) {
+    }), u = await Wr(i, function(t) {
         // It is OK that the path used for the query is not valid, because this will
         // not be read and queried.
-        return Ge(Fe(_t.fromString(`__bundle__/docs/${t}`)));
+        return De(Ae(_t.fromString(`__bundle__/docs/${t}`)));
     }(s));
     // Allocates a target to hold all document keys from the bundle, such that
     // they will not get garbage collected right away.
-        return i.persistence.runTransaction("Apply bundle documents", "readwrite", (t => ao(t, u, o).next((e => (u.apply(t), 
-    e))).next((e => i.fs.removeMatchingKeysForTargetId(t, a.targetId).next((() => i.fs.addMatchingKeys(t, r, a.targetId))).next((() => i.ci.Gs(t, e))).next((() => e))))));
+        return i.persistence.runTransaction("Apply bundle documents", "readwrite", (t => jr(t, c, o).next((e => (c.apply(t), 
+    e))).next((e => i.Un.removeMatchingKeysForTargetId(t, u.targetId).next((() => i.Un.addMatchingKeys(t, r, u.targetId))).next((() => i.Us.Ts(t, e))).next((() => e))))));
 }
 
 /**
@@ -13795,21 +13419,21 @@ async function go(t, e, n, s) {
 /**
  * Saves the given `NamedQuery` to local persistence.
  */
-async function yo(t, e, n = Xn()) {
+async function to(t, e, n = On()) {
     // Allocate a target for the named query such that it can be resumed
     // from associated read time if users use it to listen.
     // NOTE: this also means if no corresponding target exists, the new target
     // will remain active and will not get collected, unless users happen to
     // unlisten the query somehow.
-    const s = await ho(t, Ge(Gi(e.bundledQuery))), i = K(t);
+    const s = await Wr(t, De(Si(e.bundledQuery))), i = K(t);
     return i.persistence.runTransaction("Save named query", "readwrite", (t => {
-        const r = ms(e.readTime);
+        const r = Zn(e.readTime);
         // Simply save the query itself if it is older than what the SDK already
         // has.
-                if (s.snapshotVersion.compareTo(r) >= 0) return i._s.saveNamedQuery(t, e);
+                if (s.snapshotVersion.compareTo(r) >= 0) return i.Kn.saveNamedQuery(t, e);
         // Update existing target data because the query from the bundle is newer.
                 const o = s.withResumeToken(pt.EMPTY_BYTE_STRING, r);
-        return i.ii = i.ii.insert(o.targetId, o), i.fs.updateTargetData(t, o).next((() => i.fs.removeMatchingKeysForTargetId(t, s.targetId))).next((() => i.fs.addMatchingKeys(t, n, s.targetId))).next((() => i._s.saveNamedQuery(t, e)));
+        return i.Ms = i.Ms.insert(o.targetId, o), i.Un.updateTargetData(t, o).next((() => i.Un.removeMatchingKeysForTargetId(t, s.targetId))).next((() => i.Un.addMatchingKeys(t, n, s.targetId))).next((() => i.Kn.saveNamedQuery(t, e)));
     }));
 }
 
@@ -13828,33 +13452,33 @@ async function yo(t, e, n = Xn()) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class po {
+ */ class eo {
     constructor(t) {
-        this.M = t, this.wi = new Map, this.mi = new Map;
+        this.O = t, this.Ws = new Map, this.zs = new Map;
     }
     getBundleMetadata(t, e) {
-        return pi.resolve(this.wi.get(e));
+        return si.resolve(this.Ws.get(e));
     }
     saveBundleMetadata(t, e) {
         /** Decodes a BundleMetadata proto into a BundleMetadata object. */
         var n;
-        return this.wi.set(e.id, {
+        return this.Ws.set(e.id, {
             id: (n = e).id,
             version: n.version,
-            createTime: ms(n.createTime)
-        }), pi.resolve();
+            createTime: Zn(n.createTime)
+        }), si.resolve();
     }
     getNamedQuery(t, e) {
-        return pi.resolve(this.mi.get(e));
+        return si.resolve(this.zs.get(e));
     }
     saveNamedQuery(t, e) {
-        return this.mi.set(e.name, function(t) {
+        return this.zs.set(e.name, function(t) {
             return {
                 name: t.name,
-                query: Gi(t.bundledQuery),
-                readTime: ms(t.readTime)
+                query: Si(t.bundledQuery),
+                readTime: Zn(t.readTime)
             };
-        }(e)), pi.resolve();
+        }(e)), si.resolve();
     }
 }
 
@@ -13876,63 +13500,59 @@ async function yo(t, e, n = Xn()) {
  */
 /**
  * An in-memory implementation of DocumentOverlayCache.
- */ class Io {
+ */ class no {
     constructor() {
         // A map sorted by DocumentKey, whose value is a pair of the largest batch id
         // for the overlay and the overlay itself.
-        this.overlays = new Bn(xt.comparator), this.gi = new Map;
+        this.overlays = new An(Nt.comparator), this.Hs = new Map;
     }
     getOverlay(t, e) {
-        return pi.resolve(this.overlays.get(e));
+        return si.resolve(this.overlays.get(e));
     }
     saveOverlays(t, e, n) {
-        return n.forEach(((n, s) => {
-            this.Xt(t, e, s);
-        })), pi.resolve();
+        return n.forEach((n => {
+            this.Yt(t, e, n);
+        })), si.resolve();
     }
     removeOverlaysForBatchId(t, e, n) {
-        const s = this.gi.get(n);
+        const s = this.Hs.get(n);
         return void 0 !== s && (s.forEach((t => this.overlays = this.overlays.remove(t))), 
-        this.gi.delete(n)), pi.resolve();
+        this.Hs.delete(n)), si.resolve();
     }
     getOverlaysForCollection(t, e, n) {
-        const s = Hn(), i = e.length + 1, r = new xt(e.child("")), o = this.overlays.getIteratorFrom(r);
+        const s = new Map, i = e.length + 1, r = new Nt(e.child("")), o = this.overlays.getIteratorFrom(r);
         for (;o.hasNext(); ) {
             const t = o.getNext().value, r = t.getKey();
             if (!e.isPrefixOf(r.path)) break;
             // Documents from sub-collections
                         r.path.length === i && (t.largestBatchId > n && s.set(t.getKey(), t));
         }
-        return pi.resolve(s);
+        return si.resolve(s);
     }
     getOverlaysForCollectionGroup(t, e, n, s) {
-        let i = new Bn(((t, e) => t - e));
+        let i = new An(((t, e) => t - e));
         const r = this.overlays.getIterator();
         for (;r.hasNext(); ) {
             const t = r.getNext().value;
             if (t.getKey().getCollectionGroup() === e && t.largestBatchId > n) {
                 let e = i.get(t.largestBatchId);
-                null === e && (e = Hn(), i = i.insert(t.largestBatchId, e)), e.set(t.getKey(), t);
+                null === e && (e = new Map, i = i.insert(t.largestBatchId, e)), e.set(t.getKey(), t);
             }
         }
-        const o = Hn(), u = i.getIterator();
-        for (;u.hasNext(); ) {
-            if (u.getNext().value.forEach(((t, e) => o.set(t, e))), o.size() >= s) break;
+        const o = new Map, c = i.getIterator();
+        for (;c.hasNext(); ) {
+            if (c.getNext().value.forEach(((t, e) => o.set(e, t))), o.size >= s) break;
         }
-        return pi.resolve(o);
+        return si.resolve(o);
     }
-    Xt(t, e, n) {
+    Yt(t, e, n) {
         if (null === n) return;
         // Remove the association of the overlay to its batch id.
                 const s = this.overlays.get(n.key);
-        if (null !== s) {
-            const t = this.gi.get(s.largestBatchId).delete(n.key);
-            this.gi.set(s.largestBatchId, t);
-        }
-        this.overlays = this.overlays.insert(n.key, new Ni(e, n));
+        null !== s && this.Hs.get(s.largestBatchId).delete(n.key), this.overlays = this.overlays.insert(n.key, new gi(e, n));
         // Create the association of this overlay to the given largestBatchId.
-        let i = this.gi.get(e);
-        void 0 === i && (i = Xn(), this.gi.set(e, i)), this.gi.set(e, i.add(n.key));
+        let i = this.Hs.get(e);
+        void 0 === i && (i = new Set, this.Hs.set(e, i)), i.add(n.key);
     }
 }
 
@@ -13966,69 +13586,69 @@ async function yo(t, e, n = Xn()) {
  * ReferenceSet also keeps a secondary set that contains references sorted by
  * IDs. This one is used to efficiently implement removal of all references by
  * some target ID.
- */ class To {
+ */ class so {
     constructor() {
         // A set of outstanding references to a document sorted by key.
-        this.yi = new qn(Eo.pi), 
+        this.Js = new bn(io.Ys), 
         // A set of outstanding references to a document sorted by target id.
-        this.Ii = new qn(Eo.Ti);
+        this.Xs = new bn(io.Zs);
     }
     /** Returns true if the reference set contains no references. */    isEmpty() {
-        return this.yi.isEmpty();
+        return this.Js.isEmpty();
     }
     /** Adds a reference to the given document key for the given ID. */    addReference(t, e) {
-        const n = new Eo(t, e);
-        this.yi = this.yi.add(n), this.Ii = this.Ii.add(n);
+        const n = new io(t, e);
+        this.Js = this.Js.add(n), this.Xs = this.Xs.add(n);
     }
-    /** Add references to the given document keys for the given ID. */    Ei(t, e) {
+    /** Add references to the given document keys for the given ID. */    ti(t, e) {
         t.forEach((t => this.addReference(t, e)));
     }
     /**
      * Removes a reference to the given document key for the given
      * ID.
      */    removeReference(t, e) {
-        this.Ai(new Eo(t, e));
+        this.ei(new io(t, e));
     }
-    Ri(t, e) {
+    ni(t, e) {
         t.forEach((t => this.removeReference(t, e)));
     }
     /**
      * Clears all references with a given ID. Calls removeRef() for each key
      * removed.
-     */    Pi(t) {
-        const e = new xt(new _t([])), n = new Eo(e, t), s = new Eo(e, t + 1), i = [];
-        return this.Ii.forEachInRange([ n, s ], (t => {
-            this.Ai(t), i.push(t.key);
+     */    si(t) {
+        const e = new Nt(new _t([])), n = new io(e, t), s = new io(e, t + 1), i = [];
+        return this.Xs.forEachInRange([ n, s ], (t => {
+            this.ei(t), i.push(t.key);
         })), i;
     }
-    bi() {
-        this.yi.forEach((t => this.Ai(t)));
+    ii() {
+        this.Js.forEach((t => this.ei(t)));
     }
-    Ai(t) {
-        this.yi = this.yi.delete(t), this.Ii = this.Ii.delete(t);
+    ei(t) {
+        this.Js = this.Js.delete(t), this.Xs = this.Xs.delete(t);
     }
-    Vi(t) {
-        const e = new xt(new _t([])), n = new Eo(e, t), s = new Eo(e, t + 1);
-        let i = Xn();
-        return this.Ii.forEachInRange([ n, s ], (t => {
+    ri(t) {
+        const e = new Nt(new _t([])), n = new io(e, t), s = new io(e, t + 1);
+        let i = On();
+        return this.Xs.forEachInRange([ n, s ], (t => {
             i = i.add(t.key);
         })), i;
     }
     containsKey(t) {
-        const e = new Eo(t, 0), n = this.yi.firstAfterOrEqual(e);
+        const e = new io(t, 0), n = this.Js.firstAfterOrEqual(e);
         return null !== n && t.isEqual(n.key);
     }
 }
 
-class Eo {
+class io {
     constructor(t, e) {
-        this.key = t, this.vi = e;
+        this.key = t, this.oi = e;
     }
-    /** Compare by key then by ID */    static pi(t, e) {
-        return xt.comparator(t.key, e.key) || rt(t.vi, e.vi);
+    /** Compare by key then by ID */    static Ys(t, e) {
+        return Nt.comparator(t.key, e.key) || rt(t.oi, e.oi);
     }
-    /** Compare by ID then by key */    static Ti(t, e) {
-        return rt(t.vi, e.vi) || xt.comparator(t.key, e.key);
+    /** Compare by ID then by key */    static Zs(t, e) {
+        return rt(t.oi, e.oi) || Nt.comparator(t.key, e.key);
     }
 }
 
@@ -14047,61 +13667,61 @@ class Eo {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Ao {
+ */ class ro {
     constructor(t, e) {
         this.indexManager = t, this.referenceDelegate = e, 
         /**
          * The set of all mutations that have been sent but not yet been applied to
          * the backend.
          */
-        this.Bs = [], 
+        this.gs = [], 
         /** Next value to use when assigning sequential IDs to each mutation batch. */
-        this.Si = 1, 
+        this.ci = 1, 
         /** An ordered mapping between documents and the mutations batch IDs. */
-        this.Di = new qn(Eo.pi);
+        this.ui = new bn(io.Ys);
     }
     checkEmpty(t) {
-        return pi.resolve(0 === this.Bs.length);
+        return si.resolve(0 === this.gs.length);
     }
     addMutationBatch(t, e, n, s) {
-        const i = this.Si;
-        this.Si++, this.Bs.length > 0 && this.Bs[this.Bs.length - 1];
-        const r = new Ci(i, e, n, s);
-        this.Bs.push(r);
+        const i = this.ci;
+        this.ci++, this.gs.length > 0 && this.gs[this.gs.length - 1];
+        const r = new wi(i, e, n, s);
+        this.gs.push(r);
         // Track references by document key and index collection parents.
-        for (const e of s) this.Di = this.Di.add(new Eo(e.key, i)), this.indexManager.addToCollectionParentIndex(t, e.key.path.popLast());
-        return pi.resolve(r);
+        for (const e of s) this.ui = this.ui.add(new io(e.key, i)), this.indexManager.addToCollectionParentIndex(t, e.key.path.popLast());
+        return si.resolve(r);
     }
     lookupMutationBatch(t, e) {
-        return pi.resolve(this.Ci(e));
+        return si.resolve(this.ai(e));
     }
     getNextMutationBatchAfterBatchId(t, e) {
-        const n = e + 1, s = this.xi(n), i = s < 0 ? 0 : s;
+        const n = e + 1, s = this.hi(n), i = s < 0 ? 0 : s;
         // The requested batchId may still be out of range so normalize it to the
         // start of the queue.
-                return pi.resolve(this.Bs.length > i ? this.Bs[i] : null);
+                return si.resolve(this.gs.length > i ? this.gs[i] : null);
     }
     getHighestUnacknowledgedBatchId() {
-        return pi.resolve(0 === this.Bs.length ? -1 : this.Si - 1);
+        return si.resolve(0 === this.gs.length ? -1 : this.ci - 1);
     }
     getAllMutationBatches(t) {
-        return pi.resolve(this.Bs.slice());
+        return si.resolve(this.gs.slice());
     }
     getAllMutationBatchesAffectingDocumentKey(t, e) {
-        const n = new Eo(e, 0), s = new Eo(e, Number.POSITIVE_INFINITY), i = [];
-        return this.Di.forEachInRange([ n, s ], (t => {
-            const e = this.Ci(t.vi);
+        const n = new io(e, 0), s = new io(e, Number.POSITIVE_INFINITY), i = [];
+        return this.ui.forEachInRange([ n, s ], (t => {
+            const e = this.ai(t.oi);
             i.push(e);
-        })), pi.resolve(i);
+        })), si.resolve(i);
     }
     getAllMutationBatchesAffectingDocumentKeys(t, e) {
-        let n = new qn(rt);
+        let n = new bn(rt);
         return e.forEach((t => {
-            const e = new Eo(t, 0), s = new Eo(t, Number.POSITIVE_INFINITY);
-            this.Di.forEachInRange([ e, s ], (t => {
-                n = n.add(t.vi);
+            const e = new io(t, 0), s = new io(t, Number.POSITIVE_INFINITY);
+            this.ui.forEachInRange([ e, s ], (t => {
+                n = n.add(t.oi);
             }));
-        })), pi.resolve(this.Ni(n));
+        })), si.resolve(this.li(n));
     }
     getAllMutationBatchesAffectingQuery(t, e) {
         // Use the query path as a prefix for testing if a document matches the
@@ -14112,12 +13732,12 @@ class Eo {
         // segments. The empty segment can be used a suffix of the query path
         // because it precedes all other segments in an ordered traversal.
         let i = n;
-        xt.isDocumentKey(i) || (i = i.child(""));
-        const r = new Eo(new xt(i), 0);
+        Nt.isDocumentKey(i) || (i = i.child(""));
+        const r = new io(new Nt(i), 0);
         // Find unique batchIDs referenced by all documents potentially matching the
         // query.
-                let o = new qn(rt);
-        return this.Di.forEachWhile((t => {
+                let o = new bn(rt);
+        return this.ui.forEachWhile((t => {
             const e = t.key.path;
             return !!n.isPrefixOf(e) && (
             // Rows with document keys more than one segment longer than the query
@@ -14125,37 +13745,37 @@ class Eo {
             // the document /rooms/abc/messages/xyx.
             // TODO(mcg): we'll need a different scanner when we implement
             // ancestor queries.
-            e.length === s && (o = o.add(t.vi)), !0);
-        }), r), pi.resolve(this.Ni(o));
+            e.length === s && (o = o.add(t.oi)), !0);
+        }), r), si.resolve(this.li(o));
     }
-    Ni(t) {
+    li(t) {
         // Construct an array of matching batches, sorted by batchID to ensure that
         // multiple mutations affecting the same document key are applied in order.
         const e = [];
         return t.forEach((t => {
-            const n = this.Ci(t);
+            const n = this.ai(t);
             null !== n && e.push(n);
         })), e;
     }
     removeMutationBatch(t, e) {
-        U(0 === this.ki(e.batchId, "removed")), this.Bs.shift();
-        let n = this.Di;
-        return pi.forEach(e.mutations, (s => {
-            const i = new Eo(s.key, e.batchId);
+        U(0 === this.fi(e.batchId, "removed")), this.gs.shift();
+        let n = this.ui;
+        return si.forEach(e.mutations, (s => {
+            const i = new io(s.key, e.batchId);
             return n = n.delete(i), this.referenceDelegate.markPotentiallyOrphaned(t, s.key);
         })).next((() => {
-            this.Di = n;
+            this.ui = n;
         }));
     }
-    _n(t) {
+    Qe(t) {
         // No-op since the memory mutation queue does not maintain a separate cache.
     }
     containsKey(t, e) {
-        const n = new Eo(e, 0), s = this.Di.firstAfterOrEqual(n);
-        return pi.resolve(e.isEqual(s && s.key));
+        const n = new io(e, 0), s = this.ui.firstAfterOrEqual(n);
+        return si.resolve(e.isEqual(s && s.key));
     }
     performConsistencyCheck(t) {
-        return this.Bs.length, pi.resolve();
+        return this.gs.length, si.resolve();
     }
     /**
      * Finds the index of the given batchId in the mutation queue and asserts that
@@ -14164,8 +13784,8 @@ class Eo {
      * @param batchId - The batchId to search for
      * @param action - A description of what the caller is doing, phrased in passive
      * form (e.g. "acknowledged" in a routine that acknowledges batches).
-     */    ki(t, e) {
-        return this.xi(t);
+     */    fi(t, e) {
+        return this.hi(t);
     }
     /**
      * Finds the index of the given batchId in the mutation queue. This operation
@@ -14175,23 +13795,23 @@ class Eo {
      * the state of the queue. Note this index can be negative if the requested
      * batchId has already been remvoed from the queue or past the end of the
      * queue if the batchId is larger than the last added batch.
-     */    xi(t) {
-        if (0 === this.Bs.length) 
+     */    hi(t) {
+        if (0 === this.gs.length) 
         // As an index this is past the end of the queue
         return 0;
         // Examine the front of the queue to figure out the difference between the
         // batchId and indexes in the array. Note that since the queue is ordered
         // by batchId, if the first batch has a larger batchId then the requested
         // batchId doesn't exist in the queue.
-                return t - this.Bs[0].batchId;
+                return t - this.gs[0].batchId;
     }
     /**
      * A version of lookupMutationBatch that doesn't return a promise, this makes
      * other functions that uses this code easier to read and more efficent.
-     */    Ci(t) {
-        const e = this.xi(t);
-        if (e < 0 || e >= this.Bs.length) return null;
-        return this.Bs[e];
+     */    ai(t) {
+        const e = this.hi(t);
+        if (e < 0 || e >= this.gs.length) return null;
+        return this.gs[e];
     }
 }
 
@@ -14215,16 +13835,16 @@ class Eo {
  * The memory-only RemoteDocumentCache for IndexedDb. To construct, invoke
  * `newMemoryRemoteDocumentCache()`.
  */
-class Ro {
+class oo {
     /**
      * @param sizer - Used to assess the size of a document. For eager GC, this is
      * expected to just return 0 to avoid unnecessarily doing the work of
      * calculating the size.
      */
     constructor(t) {
-        this.Mi = t, 
+        this.di = t, 
         /** Underlying cache of documents and their read times. */
-        this.docs = new Bn(xt.comparator), 
+        this.docs = new An(Nt.comparator), 
         /** Size of all cached documents. */
         this.size = 0;
     }
@@ -14237,7 +13857,7 @@ class Ro {
      * All calls of `addEntry`  are required to go through the RemoteDocumentChangeBuffer
      * returned by `newChangeBuffer()`.
      */    addEntry(t, e) {
-        const n = e.key, s = this.docs.get(n), i = s ? s.size : 0, r = this.Mi(e);
+        const n = e.key, s = this.docs.get(n), i = s ? s.size : 0, r = this.di(e);
         return this.docs = this.docs.insert(n, {
             document: e.mutableCopy(),
             size: r
@@ -14254,42 +13874,37 @@ class Ro {
     }
     getEntry(t, e) {
         const n = this.docs.get(e);
-        return pi.resolve(n ? n.document.mutableCopy() : ne.newInvalidDocument(e));
+        return si.resolve(n ? n.document.mutableCopy() : Jt.newInvalidDocument(e));
     }
     getEntries(t, e) {
-        let n = jn();
+        let n = Dn();
         return e.forEach((t => {
             const e = this.docs.get(t);
-            n = n.insert(t, e ? e.document.mutableCopy() : ne.newInvalidDocument(t));
-        })), pi.resolve(n);
+            n = n.insert(t, e ? e.document.mutableCopy() : Jt.newInvalidDocument(t));
+        })), si.resolve(n);
     }
-    getAllFromCollection(t, e, n) {
-        let s = jn();
+    getAll(t, e, n) {
+        let s = Dn();
         // Documents are ordered by key, so we can use a prefix scan to narrow down
         // the documents we need to match the query against.
-                const i = new xt(e.child("")), r = this.docs.getIteratorFrom(i);
+                const i = new Nt(e.child("")), r = this.docs.getIteratorFrom(i);
         for (;r.hasNext(); ) {
             const {key: t, value: {document: i}} = r.getNext();
             if (!e.isPrefixOf(t.path)) break;
-            t.path.length > e.length + 1 || (le(ce(i), n) <= 0 || (s = s.insert(i.key, i.mutableCopy())));
+            t.path.length > e.length + 1 || (i.readTime.compareTo(n) <= 0 || (s = s.insert(i.key, i.mutableCopy())));
         }
-        return pi.resolve(s);
+        return si.resolve(s);
     }
-    getAllFromCollectionGroup(t, e, n, s) {
-        // This method should only be called from the IndexBackfiller if persistence
-        // is enabled.
-        L();
-    }
-    Oi(t, e) {
-        return pi.forEach(this.docs, (t => e(t)));
+    _i(t, e) {
+        return si.forEach(this.docs, (t => e(t)));
     }
     newChangeBuffer(t) {
         // `trackRemovals` is ignores since the MemoryRemoteDocumentCache keeps
         // a separate changelog and does not need special handling for removals.
-        return new Po(this);
+        return new co(this);
     }
     getSize(t) {
-        return pi.resolve(this.size);
+        return si.resolve(this.size);
     }
 }
 
@@ -14303,21 +13918,21 @@ class Ro {
 /**
  * Handles the details of adding and updating documents in the MemoryRemoteDocumentCache.
  */
-class Po extends $r {
+class co extends Tr {
     constructor(t) {
-        super(), this.Kn = t;
+        super(), this.Tn = t;
     }
     applyChanges(t) {
         const e = [];
         return this.changes.forEach(((n, s) => {
-            s.isValidDocument() ? e.push(this.Kn.addEntry(t, s)) : this.Kn.removeEntry(n);
-        })), pi.waitFor(e);
+            s.isValidDocument() ? e.push(this.Tn.addEntry(t, s)) : this.Tn.removeEntry(n);
+        })), si.waitFor(e);
     }
     getFromCache(t, e) {
-        return this.Kn.getEntry(t, e);
+        return this.Tn.getEntry(t, e);
     }
     getAllFromCache(t, e) {
-        return this.Kn.getEntries(t, e);
+        return this.Tn.getEntries(t, e);
     }
 }
 
@@ -14336,90 +13951,90 @@ class Po extends $r {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class bo {
+ */ class uo {
     constructor(t) {
         this.persistence = t, 
         /**
          * Maps a target to the data about that target
          */
-        this.Fi = new $n((t => _e(t)), me), 
+        this.wi = new Er((t => se(t)), re), 
         /** The last received snapshot version. */
-        this.lastRemoteSnapshotVersion = ct.min(), 
+        this.lastRemoteSnapshotVersion = at.min(), 
         /** The highest numbered target ID encountered. */
         this.highestTargetId = 0, 
         /** The highest sequence number encountered. */
-        this.$i = 0, 
+        this.mi = 0, 
         /**
          * A ordered bidirectional mapping between documents and the remote target
          * IDs.
          */
-        this.Bi = new To, this.targetCount = 0, this.Li = br.gn();
+        this.gi = new so, this.targetCount = 0, this.yi = ar.He();
     }
     forEachTarget(t, e) {
-        return this.Fi.forEach(((t, n) => e(n))), pi.resolve();
+        return this.wi.forEach(((t, n) => e(n))), si.resolve();
     }
     getLastRemoteSnapshotVersion(t) {
-        return pi.resolve(this.lastRemoteSnapshotVersion);
+        return si.resolve(this.lastRemoteSnapshotVersion);
     }
     getHighestSequenceNumber(t) {
-        return pi.resolve(this.$i);
+        return si.resolve(this.mi);
     }
     allocateTargetId(t) {
-        return this.highestTargetId = this.Li.next(), pi.resolve(this.highestTargetId);
+        return this.highestTargetId = this.yi.next(), si.resolve(this.highestTargetId);
     }
     setTargetsMetadata(t, e, n) {
-        return n && (this.lastRemoteSnapshotVersion = n), e > this.$i && (this.$i = e), 
-        pi.resolve();
+        return n && (this.lastRemoteSnapshotVersion = n), e > this.mi && (this.mi = e), 
+        si.resolve();
     }
-    Tn(t) {
-        this.Fi.set(t.target, t);
+    Ze(t) {
+        this.wi.set(t.target, t);
         const e = t.targetId;
-        e > this.highestTargetId && (this.Li = new br(e), this.highestTargetId = e), t.sequenceNumber > this.$i && (this.$i = t.sequenceNumber);
+        e > this.highestTargetId && (this.yi = new ar(e), this.highestTargetId = e), t.sequenceNumber > this.mi && (this.mi = t.sequenceNumber);
     }
     addTargetData(t, e) {
-        return this.Tn(e), this.targetCount += 1, pi.resolve();
+        return this.Ze(e), this.targetCount += 1, si.resolve();
     }
     updateTargetData(t, e) {
-        return this.Tn(e), pi.resolve();
+        return this.Ze(e), si.resolve();
     }
     removeTargetData(t, e) {
-        return this.Fi.delete(e.target), this.Bi.Pi(e.targetId), this.targetCount -= 1, 
-        pi.resolve();
+        return this.wi.delete(e.target), this.gi.si(e.targetId), this.targetCount -= 1, 
+        si.resolve();
     }
     removeTargets(t, e, n) {
         let s = 0;
         const i = [];
-        return this.Fi.forEach(((r, o) => {
-            o.sequenceNumber <= e && null === n.get(o.targetId) && (this.Fi.delete(r), i.push(this.removeMatchingKeysForTargetId(t, o.targetId)), 
+        return this.wi.forEach(((r, o) => {
+            o.sequenceNumber <= e && null === n.get(o.targetId) && (this.wi.delete(r), i.push(this.removeMatchingKeysForTargetId(t, o.targetId)), 
             s++);
-        })), pi.waitFor(i).next((() => s));
+        })), si.waitFor(i).next((() => s));
     }
     getTargetCount(t) {
-        return pi.resolve(this.targetCount);
+        return si.resolve(this.targetCount);
     }
     getTargetData(t, e) {
-        const n = this.Fi.get(e) || null;
-        return pi.resolve(n);
+        const n = this.wi.get(e) || null;
+        return si.resolve(n);
     }
     addMatchingKeys(t, e, n) {
-        return this.Bi.Ei(e, n), pi.resolve();
+        return this.gi.ti(e, n), si.resolve();
     }
     removeMatchingKeys(t, e, n) {
-        this.Bi.Ri(e, n);
+        this.gi.ni(e, n);
         const s = this.persistence.referenceDelegate, i = [];
         return s && e.forEach((e => {
             i.push(s.markPotentiallyOrphaned(t, e));
-        })), pi.waitFor(i);
+        })), si.waitFor(i);
     }
     removeMatchingKeysForTargetId(t, e) {
-        return this.Bi.Pi(e), pi.resolve();
+        return this.gi.si(e), si.resolve();
     }
     getMatchingKeysForTargetId(t, e) {
-        const n = this.Bi.Vi(e);
-        return pi.resolve(n);
+        const n = this.gi.ri(e);
+        return si.resolve(n);
     }
     containsKey(t, e) {
-        return pi.resolve(this.Bi.containsKey(e));
+        return si.resolve(this.gi.containsKey(e));
     }
 }
 
@@ -14443,7 +14058,7 @@ class Po extends $r {
  * A memory-backed instance of Persistence. Data is stored only in RAM and
  * not persisted across sessions.
  */
-class Vo {
+class ao {
     /**
      * The constructor accepts a factory for creating a reference delegate. This
      * allows both the delegate and this instance to have strong references to
@@ -14451,21 +14066,21 @@ class Vo {
      * checked or asserted on every access.
      */
     constructor(t, e) {
-        this.Ui = {}, this.overlays = {}, this.es = new nt(0), this.ns = !1, this.ns = !0, 
-        this.referenceDelegate = t(this), this.fs = new bo(this);
-        this.indexManager = new cr, this.ds = function(t) {
-            return new Ro(t);
-        }((t => this.referenceDelegate.qi(t))), this.M = new Mi(e), this._s = new po(this.M);
+        this.pi = {}, this.overlays = {}, this.Nn = new nt(0), this.xn = !1, this.xn = !0, 
+        this.referenceDelegate = t(this), this.Un = new uo(this);
+        this.indexManager = new Wi, this.qn = function(t) {
+            return new oo(t);
+        }((t => this.referenceDelegate.Ii(t))), this.O = new pi(e), this.Kn = new eo(this.O);
     }
     start() {
         return Promise.resolve();
     }
     shutdown() {
         // No durable state to ensure is closed on shutdown.
-        return this.ns = !1, Promise.resolve();
+        return this.xn = !1, Promise.resolve();
     }
     get started() {
-        return this.ns;
+        return this.xn;
     }
     setDatabaseDeletedListener() {
         // No op.
@@ -14480,96 +14095,96 @@ class Vo {
     }
     getDocumentOverlayCache(t) {
         let e = this.overlays[t.toKey()];
-        return e || (e = new Io, this.overlays[t.toKey()] = e), e;
+        return e || (e = new no, this.overlays[t.toKey()] = e), e;
     }
     getMutationQueue(t, e) {
-        let n = this.Ui[t.toKey()];
-        return n || (n = new Ao(e, this.referenceDelegate), this.Ui[t.toKey()] = n), n;
+        let n = this.pi[t.toKey()];
+        return n || (n = new ro(e, this.referenceDelegate), this.pi[t.toKey()] = n), n;
     }
     getTargetCache() {
-        return this.fs;
+        return this.Un;
     }
     getRemoteDocumentCache() {
-        return this.ds;
+        return this.qn;
     }
     getBundleCache() {
-        return this._s;
+        return this.Kn;
     }
     runTransaction(t, e, n) {
-        O("MemoryPersistence", "Starting transaction:", t);
-        const s = new vo(this.es.next());
-        return this.referenceDelegate.Ki(), n(s).next((t => this.referenceDelegate.Gi(s).next((() => t)))).toPromise().then((t => (s.raiseOnCommittedEvent(), 
+        M("MemoryPersistence", "Starting transaction:", t);
+        const s = new ho(this.Nn.next());
+        return this.referenceDelegate.Ei(), n(s).next((t => this.referenceDelegate.Ti(s).next((() => t)))).toPromise().then((t => (s.raiseOnCommittedEvent(), 
         t)));
     }
-    Qi(t, e) {
-        return pi.or(Object.values(this.Ui).map((n => () => n.containsKey(t, e))));
+    Ai(t, e) {
+        return si.or(Object.values(this.pi).map((n => () => n.containsKey(t, e))));
     }
 }
 
 /**
  * Memory persistence is not actually transactional, but future implementations
  * may have transaction-scoped state.
- */ class vo extends yi {
+ */ class ho extends ni {
     constructor(t) {
         super(), this.currentSequenceNumber = t;
     }
 }
 
-class So {
+class lo {
     constructor(t) {
         this.persistence = t, 
         /** Tracks all documents that are active in Query views. */
-        this.ji = new To, 
+        this.Ri = new so, 
         /** The list of documents that are potentially GCed after each transaction. */
-        this.Wi = null;
+        this.Pi = null;
     }
-    static zi(t) {
-        return new So(t);
+    static bi(t) {
+        return new lo(t);
     }
-    get Hi() {
-        if (this.Wi) return this.Wi;
+    get vi() {
+        if (this.Pi) return this.Pi;
         throw L();
     }
     addReference(t, e, n) {
-        return this.ji.addReference(n, e), this.Hi.delete(n.toString()), pi.resolve();
+        return this.Ri.addReference(n, e), this.vi.delete(n.toString()), si.resolve();
     }
     removeReference(t, e, n) {
-        return this.ji.removeReference(n, e), this.Hi.add(n.toString()), pi.resolve();
+        return this.Ri.removeReference(n, e), this.vi.add(n.toString()), si.resolve();
     }
     markPotentiallyOrphaned(t, e) {
-        return this.Hi.add(e.toString()), pi.resolve();
+        return this.vi.add(e.toString()), si.resolve();
     }
     removeTarget(t, e) {
-        this.ji.Pi(e.targetId).forEach((t => this.Hi.add(t.toString())));
+        this.Ri.si(e.targetId).forEach((t => this.vi.add(t.toString())));
         const n = this.persistence.getTargetCache();
         return n.getMatchingKeysForTargetId(t, e.targetId).next((t => {
-            t.forEach((t => this.Hi.add(t.toString())));
+            t.forEach((t => this.vi.add(t.toString())));
         })).next((() => n.removeTargetData(t, e)));
     }
-    Ki() {
-        this.Wi = new Set;
+    Ei() {
+        this.Pi = new Set;
     }
-    Gi(t) {
+    Ti(t) {
         // Remove newly orphaned documents.
         const e = this.persistence.getRemoteDocumentCache().newChangeBuffer();
-        return pi.forEach(this.Hi, (n => {
-            const s = xt.fromPath(n);
-            return this.Ji(t, s).next((t => {
-                t || e.removeEntry(s, ct.min());
+        return si.forEach(this.vi, (n => {
+            const s = Nt.fromPath(n);
+            return this.Vi(t, s).next((t => {
+                t || e.removeEntry(s, at.min());
             }));
-        })).next((() => (this.Wi = null, e.apply(t))));
+        })).next((() => (this.Pi = null, e.apply(t))));
     }
     updateLimboDocument(t, e) {
-        return this.Ji(t, e).next((t => {
-            t ? this.Hi.delete(e.toString()) : this.Hi.add(e.toString());
+        return this.Vi(t, e).next((t => {
+            t ? this.vi.delete(e.toString()) : this.vi.add(e.toString());
         }));
     }
-    qi(t) {
+    Ii(t) {
         // For eager GC, we don't care about the document size, there are no size thresholds.
         return 0;
     }
-    Ji(t, e) {
-        return pi.or([ () => pi.resolve(this.ji.containsKey(e)), () => this.persistence.getTargetCache().containsKey(t, e), () => this.persistence.Qi(t, e) ]);
+    Vi(t, e) {
+        return si.or([ () => si.resolve(this.Ri.containsKey(e)), () => this.persistence.getTargetCache().containsKey(t, e), () => this.persistence.Ai(t, e) ]);
     }
 }
 
@@ -14592,7 +14207,7 @@ class So {
 // The format of the LocalStorage key that stores the client state is:
 //     firestore_clients_<persistence_prefix>_<instance_key>
 /** Assembles the key for a client state in WebStorage */
-function Do(t, e) {
+function fo(t, e) {
     return `firestore_clients_${t}_${e}`;
 }
 
@@ -14604,7 +14219,7 @@ function Do(t, e) {
 // 'user_uid' is last to avoid needing to escape '_' characters that it might
 // contain.
 /** Assembles the key for a mutation batch in WebStorage */
-function Co(t, e, n) {
+function _o(t, e, n) {
     let s = `firestore_mutations_${t}_${n}`;
     return e.isAuthenticated() && (s += `_${e.uid}`), s;
 }
@@ -14612,7 +14227,7 @@ function Co(t, e, n) {
 // The format of the WebStorage key that stores a query target's metadata is:
 //     firestore_targets_<persistence_prefix>_<target_id>
 /** Assembles the key for a query state in WebStorage */
-function xo(t, e) {
+function wo(t, e) {
     return `firestore_targets_${t}_${e}`;
 }
 
@@ -14624,21 +14239,21 @@ function xo(t, e) {
  * whether the batch is 'pending', 'acknowledged' or 'rejected'.
  */
 // Visible for testing
-class No {
+class mo {
     constructor(t, e, n, s) {
         this.user = t, this.batchId = e, this.state = n, this.error = s;
     }
     /**
      * Parses a MutationMetadata from its JSON representation in WebStorage.
      * Logs a warning and returns null if the format of the data is not valid.
-     */    static Yi(t, e, n) {
+     */    static Si(t, e, n) {
         const s = JSON.parse(n);
         let i, r = "object" == typeof s && -1 !== [ "pending", "acknowledged", "rejected" ].indexOf(s.state) && (void 0 === s.error || "object" == typeof s.error);
         return r && s.error && (r = "string" == typeof s.error.message && "string" == typeof s.error.code, 
-        r && (i = new Q(s.error.code, s.error.message))), r ? new No(t, e, s.state, i) : (F("SharedClientState", `Failed to parse mutation state for ID '${e}': ${n}`), 
+        r && (i = new j(s.error.code, s.error.message))), r ? new mo(t, e, s.state, i) : ($("SharedClientState", `Failed to parse mutation state for ID '${e}': ${n}`), 
         null);
     }
-    Xi() {
+    Di() {
         const t = {
             state: this.state,
             updateTimeMs: Date.now()
@@ -14655,21 +14270,21 @@ class No {
  * target is 'not-current', 'current' or 'rejected'.
  */
 // Visible for testing
-class ko {
+class go {
     constructor(t, e, n) {
         this.targetId = t, this.state = e, this.error = n;
     }
     /**
      * Parses a QueryTargetMetadata from its JSON representation in WebStorage.
      * Logs a warning and returns null if the format of the data is not valid.
-     */    static Yi(t, e) {
+     */    static Si(t, e) {
         const n = JSON.parse(e);
         let s, i = "object" == typeof n && -1 !== [ "not-current", "current", "rejected" ].indexOf(n.state) && (void 0 === n.error || "object" == typeof n.error);
         return i && n.error && (i = "string" == typeof n.error.message && "string" == typeof n.error.code, 
-        i && (s = new Q(n.error.code, n.error.message))), i ? new ko(t, n.state, s) : (F("SharedClientState", `Failed to parse target state for ID '${t}': ${e}`), 
+        i && (s = new j(n.error.code, n.error.message))), i ? new go(t, n.state, s) : ($("SharedClientState", `Failed to parse target state for ID '${t}': ${e}`), 
         null);
     }
-    Xi() {
+    Di() {
         const t = {
             state: this.state,
             updateTimeMs: Date.now()
@@ -14684,19 +14299,19 @@ class ko {
 /**
  * This class represents the immutable ClientState for a client read from
  * WebStorage, containing the list of active query targets.
- */ class Mo {
+ */ class yo {
     constructor(t, e) {
         this.clientId = t, this.activeTargetIds = e;
     }
     /**
      * Parses a RemoteClientState from the JSON representation in WebStorage.
      * Logs a warning and returns null if the format of the data is not valid.
-     */    static Yi(t, e) {
+     */    static Si(t, e) {
         const n = JSON.parse(e);
-        let s = "object" == typeof n && n.activeTargetIds instanceof Array, i = ts();
+        let s = "object" == typeof n && n.activeTargetIds instanceof Array, i = $n();
         for (let t = 0; s && t < n.activeTargetIds.length; ++t) s = Ct(n.activeTargetIds[t]), 
         i = i.add(n.activeTargetIds[t]);
-        return s ? new Mo(t, i) : (F("SharedClientState", `Failed to parse client data for instance '${t}': ${e}`), 
+        return s ? new yo(t, i) : ($("SharedClientState", `Failed to parse client data for instance '${t}': ${e}`), 
         null);
     }
 }
@@ -14705,16 +14320,16 @@ class ko {
  * This class represents the online state for all clients participating in
  * multi-tab. The online state is only written to by the primary client, and
  * used in secondary clients to update their query views.
- */ class Oo {
+ */ class po {
     constructor(t, e) {
         this.clientId = t, this.onlineState = e;
     }
     /**
      * Parses a SharedOnlineState from its JSON representation in WebStorage.
      * Logs a warning and returns null if the format of the data is not valid.
-     */    static Yi(t) {
+     */    static Si(t) {
         const e = JSON.parse(t);
-        return "object" == typeof e && -1 !== [ "Unknown", "Online", "Offline" ].indexOf(e.onlineState) && "string" == typeof e.clientId ? new Oo(e.clientId, e.onlineState) : (F("SharedClientState", `Failed to parse online state: ${t}`), 
+        return "object" == typeof e && -1 !== [ "Unknown", "Online", "Offline" ].indexOf(e.onlineState) && "string" == typeof e.clientId ? new po(e.clientId, e.onlineState) : ($("SharedClientState", `Failed to parse online state: ${t}`), 
         null);
     }
 }
@@ -14730,20 +14345,20 @@ class ko {
  * `toWebStorageJSON()`.
  */
 // Visible for testing.
-class Fo {
+class Io {
     constructor() {
-        this.activeTargetIds = ts();
+        this.activeTargetIds = $n();
     }
-    Zi(t) {
+    Ci(t) {
         this.activeTargetIds = this.activeTargetIds.add(t);
     }
-    tr(t) {
+    Ni(t) {
         this.activeTargetIds = this.activeTargetIds.delete(t);
     }
     /**
      * Converts this entry into a JSON-encoded format we can use for WebStorage.
      * Does not encode `clientId` as it is part of the key in WebStorage.
-     */    Xi() {
+     */    Di() {
         const t = {
             activeTargetIds: this.activeTargetIds.toArray(),
             updateTimeMs: Date.now()
@@ -14756,21 +14371,21 @@ class Fo {
  * `WebStorageSharedClientState` uses WebStorage (window.localStorage) as the
  * backing store for the SharedClientState. It keeps track of all active
  * clients and supports modifications of the local client's data.
- */ class $o {
+ */ class Eo {
     constructor(t, e, n, s, i) {
-        this.window = t, this.Yn = e, this.persistenceKey = n, this.er = s, this.syncEngine = null, 
-        this.onlineStateHandler = null, this.sequenceNumberHandler = null, this.nr = this.sr.bind(this), 
-        this.ir = new Bn(rt), this.started = !1, 
+        this.window = t, this.Sn = e, this.persistenceKey = n, this.xi = s, this.syncEngine = null, 
+        this.onlineStateHandler = null, this.sequenceNumberHandler = null, this.ki = this.Oi.bind(this), 
+        this.Mi = new An(rt), this.started = !1, 
         /**
          * Captures WebStorage events that occur before `start()` is called. These
          * events are replayed once `WebStorageSharedClientState` is started.
          */
-        this.rr = [];
+        this.$i = [];
         // Escape the special characters mentioned here:
         // https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Regular_Expressions
         const r = n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-        this.storage = this.window.localStorage, this.currentUser = i, this.ur = Do(this.persistenceKey, this.er), 
-        this.ar = 
+        this.storage = this.window.localStorage, this.currentUser = i, this.Fi = fo(this.persistenceKey, this.xi), 
+        this.Bi = 
         /** Assembles the key for the current sequence number. */
         function(t) {
             return `firestore_sequence_number_${t}`;
@@ -14790,9 +14405,9 @@ class Fo {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ (this.persistenceKey), this.ir = this.ir.insert(this.er, new Fo), this.cr = new RegExp(`^firestore_clients_${r}_([^_]*)$`), 
-        this.hr = new RegExp(`^firestore_mutations_${r}_(\\d+)(?:_(.*))?$`), this.lr = new RegExp(`^firestore_targets_${r}_(\\d+)$`), 
-        this.dr = 
+ */ (this.persistenceKey), this.Mi = this.Mi.insert(this.xi, new Io), this.Li = new RegExp(`^firestore_clients_${r}_([^_]*)$`), 
+        this.Ui = new RegExp(`^firestore_mutations_${r}_(\\d+)(?:_(.*))?$`), this.qi = new RegExp(`^firestore_targets_${r}_(\\d+)$`), 
+        this.Ki = 
         /** Assembles the key for the online state of the primary tab. */
         function(t) {
             return `firestore_online_state_${t}`;
@@ -14800,10 +14415,9 @@ class Fo {
         // The WebStorage prefix that plays as a event to indicate the remote documents
         // might have changed due to some secondary tabs loading a bundle.
         // format of the key is:
-        //     firestore_bundle_loaded_v2_<persistenceKey>
-        // The version ending with "v2" stores the list of modified collection groups.
-        (this.persistenceKey), this._r = function(t) {
-            return `firestore_bundle_loaded_v2_${t}`;
+        //     firestore_bundle_loaded_<persistenceKey>
+        (this.persistenceKey), this.Gi = function(t) {
+            return `firestore_bundle_loaded_${t}`;
         }
         // The WebStorage key prefix for the key that stores the last sequence number allocated. The key
         // looks like 'firestore_sequence_number_<persistence_prefix>'.
@@ -14814,151 +14428,151 @@ class Fo {
         // respective start() calls). Otherwise, we might for example miss a
         // mutation that is added after LocalStore's start() processed the existing
         // mutations but before we observe WebStorage events.
-        this.window.addEventListener("storage", this.nr);
+        this.window.addEventListener("storage", this.ki);
     }
-    /** Returns 'true' if WebStorage is available in the current environment. */    static vt(t) {
+    /** Returns 'true' if WebStorage is available in the current environment. */    static Vt(t) {
         return !(!t || !t.localStorage);
     }
     async start() {
         // Retrieve the list of existing clients to backfill the data in
         // SharedClientState.
-        const t = await this.syncEngine.Fs();
+        const t = await this.syncEngine.ds();
         for (const e of t) {
-            if (e === this.er) continue;
-            const t = this.getItem(Do(this.persistenceKey, e));
+            if (e === this.xi) continue;
+            const t = this.getItem(fo(this.persistenceKey, e));
             if (t) {
-                const n = Mo.Yi(e, t);
-                n && (this.ir = this.ir.insert(n.clientId, n));
+                const n = yo.Si(e, t);
+                n && (this.Mi = this.Mi.insert(n.clientId, n));
             }
         }
-        this.wr();
+        this.ji();
         // Check if there is an existing online state and call the callback handler
         // if applicable.
-        const e = this.storage.getItem(this.dr);
+        const e = this.storage.getItem(this.Ki);
         if (e) {
-            const t = this.mr(e);
-            t && this.gr(t);
+            const t = this.Qi(e);
+            t && this.Wi(t);
         }
-        for (const t of this.rr) this.sr(t);
-        this.rr = [], 
+        for (const t of this.$i) this.Oi(t);
+        this.$i = [], 
         // Register a window unload hook to remove the client metadata entry from
         // WebStorage even if `shutdown()` was not called.
         this.window.addEventListener("pagehide", (() => this.shutdown())), this.started = !0;
     }
     writeSequenceNumber(t) {
-        this.setItem(this.ar, JSON.stringify(t));
+        this.setItem(this.Bi, JSON.stringify(t));
     }
     getAllActiveQueryTargets() {
-        return this.yr(this.ir);
+        return this.zi(this.Mi);
     }
     isActiveQueryTarget(t) {
         let e = !1;
-        return this.ir.forEach(((n, s) => {
+        return this.Mi.forEach(((n, s) => {
             s.activeTargetIds.has(t) && (e = !0);
         })), e;
     }
     addPendingMutation(t) {
-        this.pr(t, "pending");
+        this.Hi(t, "pending");
     }
     updateMutationState(t, e, n) {
-        this.pr(t, e, n), 
+        this.Hi(t, e, n), 
         // Once a final mutation result is observed by other clients, they no longer
         // access the mutation's metadata entry. Since WebStorage replays events
         // in order, it is safe to delete the entry right after updating it.
-        this.Ir(t);
+        this.Ji(t);
     }
     addLocalQueryTarget(t) {
         let e = "not-current";
         // Lookup an existing query state if the target ID was already registered
         // by another tab
                 if (this.isActiveQueryTarget(t)) {
-            const n = this.storage.getItem(xo(this.persistenceKey, t));
+            const n = this.storage.getItem(wo(this.persistenceKey, t));
             if (n) {
-                const s = ko.Yi(t, n);
+                const s = go.Si(t, n);
                 s && (e = s.state);
             }
         }
-        return this.Tr.Zi(t), this.wr(), e;
+        return this.Yi.Ci(t), this.ji(), e;
     }
     removeLocalQueryTarget(t) {
-        this.Tr.tr(t), this.wr();
+        this.Yi.Ni(t), this.ji();
     }
     isLocalQueryTarget(t) {
-        return this.Tr.activeTargetIds.has(t);
+        return this.Yi.activeTargetIds.has(t);
     }
     clearQueryState(t) {
-        this.removeItem(xo(this.persistenceKey, t));
+        this.removeItem(wo(this.persistenceKey, t));
     }
     updateQueryState(t, e, n) {
-        this.Er(t, e, n);
+        this.Xi(t, e, n);
     }
     handleUserChange(t, e, n) {
         e.forEach((t => {
-            this.Ir(t);
+            this.Ji(t);
         })), this.currentUser = t, n.forEach((t => {
             this.addPendingMutation(t);
         }));
     }
     setOnlineState(t) {
-        this.Ar(t);
+        this.Zi(t);
     }
-    notifyBundleLoaded(t) {
-        this.Rr(t);
+    notifyBundleLoaded() {
+        this.tr();
     }
     shutdown() {
-        this.started && (this.window.removeEventListener("storage", this.nr), this.removeItem(this.ur), 
+        this.started && (this.window.removeEventListener("storage", this.ki), this.removeItem(this.Fi), 
         this.started = !1);
     }
     getItem(t) {
         const e = this.storage.getItem(t);
-        return O("SharedClientState", "READ", t, e), e;
+        return M("SharedClientState", "READ", t, e), e;
     }
     setItem(t, e) {
-        O("SharedClientState", "SET", t, e), this.storage.setItem(t, e);
+        M("SharedClientState", "SET", t, e), this.storage.setItem(t, e);
     }
     removeItem(t) {
-        O("SharedClientState", "REMOVE", t), this.storage.removeItem(t);
+        M("SharedClientState", "REMOVE", t), this.storage.removeItem(t);
     }
-    sr(t) {
+    Oi(t) {
         // Note: The function is typed to take Event to be interface-compatible with
         // `Window.addEventListener`.
         const e = t;
         if (e.storageArea === this.storage) {
-            if (O("SharedClientState", "EVENT", e.key, e.newValue), e.key === this.ur) return void F("Received WebStorage notification for local change. Another client might have garbage-collected our state");
-            this.Yn.enqueueRetryable((async () => {
+            if (M("SharedClientState", "EVENT", e.key, e.newValue), e.key === this.Fi) return void $("Received WebStorage notification for local change. Another client might have garbage-collected our state");
+            this.Sn.enqueueRetryable((async () => {
                 if (this.started) {
-                    if (null !== e.key) if (this.cr.test(e.key)) {
+                    if (null !== e.key) if (this.Li.test(e.key)) {
                         if (null == e.newValue) {
-                            const t = this.Pr(e.key);
-                            return this.br(t, null);
+                            const t = this.er(e.key);
+                            return this.nr(t, null);
                         }
                         {
-                            const t = this.Vr(e.key, e.newValue);
-                            if (t) return this.br(t.clientId, t);
+                            const t = this.sr(e.key, e.newValue);
+                            if (t) return this.nr(t.clientId, t);
                         }
-                    } else if (this.hr.test(e.key)) {
+                    } else if (this.Ui.test(e.key)) {
                         if (null !== e.newValue) {
-                            const t = this.vr(e.key, e.newValue);
-                            if (t) return this.Sr(t);
+                            const t = this.ir(e.key, e.newValue);
+                            if (t) return this.rr(t);
                         }
-                    } else if (this.lr.test(e.key)) {
+                    } else if (this.qi.test(e.key)) {
                         if (null !== e.newValue) {
-                            const t = this.Dr(e.key, e.newValue);
-                            if (t) return this.Cr(t);
+                            const t = this.cr(e.key, e.newValue);
+                            if (t) return this.ur(t);
                         }
-                    } else if (e.key === this.dr) {
+                    } else if (e.key === this.Ki) {
                         if (null !== e.newValue) {
-                            const t = this.mr(e.newValue);
-                            if (t) return this.gr(t);
+                            const t = this.Qi(e.newValue);
+                            if (t) return this.Wi(t);
                         }
-                    } else if (e.key === this.ar) {
+                    } else if (e.key === this.Bi) {
                         const t = function(t) {
                             let e = nt.A;
                             if (null != t) try {
                                 const n = JSON.parse(t);
                                 U("number" == typeof n), e = n;
                             } catch (t) {
-                                F("SharedClientState", "Failed to read sequence number from WebStorage", t);
+                                $("SharedClientState", "Failed to read sequence number from WebStorage", t);
                             }
                             return e;
                         }
@@ -14968,116 +14582,109 @@ class Fo {
  * isolated and no synchronization is performed.
  */ (e.newValue);
                         t !== nt.A && this.sequenceNumberHandler(t);
-                    } else if (e.key === this._r) {
-                        const t = this.Nr(e.newValue);
-                        await Promise.all(t.map((t => this.syncEngine.kr(t))));
-                    }
-                } else this.rr.push(e);
+                    } else if (e.key === this.Gi) return this.syncEngine.ar();
+                } else this.$i.push(e);
             }));
         }
     }
-    get Tr() {
-        return this.ir.get(this.er);
+    get Yi() {
+        return this.Mi.get(this.xi);
     }
-    wr() {
-        this.setItem(this.ur, this.Tr.Xi());
+    ji() {
+        this.setItem(this.Fi, this.Yi.Di());
     }
-    pr(t, e, n) {
-        const s = new No(this.currentUser, t, e, n), i = Co(this.persistenceKey, this.currentUser, t);
-        this.setItem(i, s.Xi());
+    Hi(t, e, n) {
+        const s = new mo(this.currentUser, t, e, n), i = _o(this.persistenceKey, this.currentUser, t);
+        this.setItem(i, s.Di());
     }
-    Ir(t) {
-        const e = Co(this.persistenceKey, this.currentUser, t);
+    Ji(t) {
+        const e = _o(this.persistenceKey, this.currentUser, t);
         this.removeItem(e);
     }
-    Ar(t) {
+    Zi(t) {
         const e = {
-            clientId: this.er,
+            clientId: this.xi,
             onlineState: t
         };
-        this.storage.setItem(this.dr, JSON.stringify(e));
+        this.storage.setItem(this.Ki, JSON.stringify(e));
     }
-    Er(t, e, n) {
-        const s = xo(this.persistenceKey, t), i = new ko(t, e, n);
-        this.setItem(s, i.Xi());
+    Xi(t, e, n) {
+        const s = wo(this.persistenceKey, t), i = new go(t, e, n);
+        this.setItem(s, i.Di());
     }
-    Rr(t) {
-        const e = JSON.stringify(Array.from(t));
-        this.setItem(this._r, e);
+    tr() {
+        this.setItem(this.Gi, "value-not-used");
     }
     /**
      * Parses a client state key in WebStorage. Returns null if the key does not
      * match the expected key format.
-     */    Pr(t) {
-        const e = this.cr.exec(t);
+     */    er(t) {
+        const e = this.Li.exec(t);
         return e ? e[1] : null;
     }
     /**
      * Parses a client state in WebStorage. Returns 'null' if the value could not
      * be parsed.
-     */    Vr(t, e) {
-        const n = this.Pr(t);
-        return Mo.Yi(n, e);
+     */    sr(t, e) {
+        const n = this.er(t);
+        return yo.Si(n, e);
     }
     /**
      * Parses a mutation batch state in WebStorage. Returns 'null' if the value
      * could not be parsed.
-     */    vr(t, e) {
-        const n = this.hr.exec(t), s = Number(n[1]), i = void 0 !== n[2] ? n[2] : null;
-        return No.Yi(new C(i), s, e);
+     */    ir(t, e) {
+        const n = this.Ui.exec(t), s = Number(n[1]), i = void 0 !== n[2] ? n[2] : null;
+        return mo.Si(new C(i), s, e);
     }
     /**
      * Parses a query target state from WebStorage. Returns 'null' if the value
      * could not be parsed.
-     */    Dr(t, e) {
-        const n = this.lr.exec(t), s = Number(n[1]);
-        return ko.Yi(s, e);
+     */    cr(t, e) {
+        const n = this.qi.exec(t), s = Number(n[1]);
+        return go.Si(s, e);
     }
     /**
      * Parses an online state from WebStorage. Returns 'null' if the value
      * could not be parsed.
-     */    mr(t) {
-        return Oo.Yi(t);
+     */    Qi(t) {
+        return po.Si(t);
     }
-    Nr(t) {
-        return JSON.parse(t);
+    async rr(t) {
+        if (t.user.uid === this.currentUser.uid) return this.syncEngine.hr(t.batchId, t.state, t.error);
+        M("SharedClientState", `Ignoring mutation for non-active user ${t.user.uid}`);
     }
-    async Sr(t) {
-        if (t.user.uid === this.currentUser.uid) return this.syncEngine.Mr(t.batchId, t.state, t.error);
-        O("SharedClientState", `Ignoring mutation for non-active user ${t.user.uid}`);
+    ur(t) {
+        return this.syncEngine.lr(t.targetId, t.state, t.error);
     }
-    Cr(t) {
-        return this.syncEngine.Or(t.targetId, t.state, t.error);
-    }
-    br(t, e) {
-        const n = e ? this.ir.insert(t, e) : this.ir.remove(t), s = this.yr(this.ir), i = this.yr(n), r = [], o = [];
+    nr(t, e) {
+        const n = e ? this.Mi.insert(t, e) : this.Mi.remove(t), s = this.zi(this.Mi), i = this.zi(n), r = [], o = [];
         return i.forEach((t => {
             s.has(t) || r.push(t);
         })), s.forEach((t => {
             i.has(t) || o.push(t);
-        })), this.syncEngine.Fr(r, o).then((() => {
-            this.ir = n;
+        })), this.syncEngine.dr(r, o).then((() => {
+            this.Mi = n;
         }));
     }
-    gr(t) {
+    Wi(t) {
         // We check whether the client that wrote this online state is still active
         // by comparing its client ID to the list of clients kept active in
         // IndexedDb. If a client does not update their IndexedDb client state
         // within 5 seconds, it is considered inactive and we don't emit an online
         // state event.
-        this.ir.get(t.clientId) && this.onlineStateHandler(t.onlineState);
+        this.Mi.get(t.clientId) && this.onlineStateHandler(t.onlineState);
     }
-    yr(t) {
-        let e = ts();
+    zi(t) {
+        let e = $n();
         return t.forEach(((t, n) => {
             e = e.unionWith(n.activeTargetIds);
         })), e;
     }
 }
 
-class Bo {
+class To {
     constructor() {
-        this.$r = new Fo, this.Br = {}, this.onlineStateHandler = null, this.sequenceNumberHandler = null;
+        this._r = new Io, this.wr = {}, this.onlineStateHandler = null, this.sequenceNumberHandler = null;
     }
     addPendingMutation(t) {
         // No op.
@@ -15086,28 +14693,28 @@ class Bo {
         // No op.
     }
     addLocalQueryTarget(t) {
-        return this.$r.Zi(t), this.Br[t] || "not-current";
+        return this._r.Ci(t), this.wr[t] || "not-current";
     }
     updateQueryState(t, e, n) {
-        this.Br[t] = e;
+        this.wr[t] = e;
     }
     removeLocalQueryTarget(t) {
-        this.$r.tr(t);
+        this._r.Ni(t);
     }
     isLocalQueryTarget(t) {
-        return this.$r.activeTargetIds.has(t);
+        return this._r.activeTargetIds.has(t);
     }
     clearQueryState(t) {
-        delete this.Br[t];
+        delete this.wr[t];
     }
     getAllActiveQueryTargets() {
-        return this.$r.activeTargetIds;
+        return this._r.activeTargetIds;
     }
     isActiveQueryTarget(t) {
-        return this.$r.activeTargetIds.has(t);
+        return this._r.activeTargetIds.has(t);
     }
     start() {
-        return this.$r = new Fo, Promise.resolve();
+        return this._r = new Io, Promise.resolve();
     }
     handleUserChange(t, e, n) {
         // No op.
@@ -15117,7 +14724,7 @@ class Bo {
     }
     shutdown() {}
     writeSequenceNumber(t) {}
-    notifyBundleLoaded(t) {
+    notifyBundleLoaded() {
         // No op.
     }
 }
@@ -15137,8 +14744,8 @@ class Bo {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Lo {
-    Lr(t) {
+ */ class Ao {
+    mr(t) {
         // No-op.
     }
     shutdown() {
@@ -15167,31 +14774,31 @@ class Bo {
 /**
  * Browser implementation of ConnectivityMonitor.
  */
-class Uo {
+class Ro {
     constructor() {
-        this.Ur = () => this.qr(), this.Kr = () => this.Gr(), this.Qr = [], this.jr();
+        this.gr = () => this.yr(), this.pr = () => this.Ir(), this.Er = [], this.Tr();
     }
-    Lr(t) {
-        this.Qr.push(t);
+    mr(t) {
+        this.Er.push(t);
     }
     shutdown() {
-        window.removeEventListener("online", this.Ur), window.removeEventListener("offline", this.Kr);
+        window.removeEventListener("online", this.gr), window.removeEventListener("offline", this.pr);
     }
-    jr() {
-        window.addEventListener("online", this.Ur), window.addEventListener("offline", this.Kr);
+    Tr() {
+        window.addEventListener("online", this.gr), window.addEventListener("offline", this.pr);
     }
-    qr() {
-        O("ConnectivityMonitor", "Network connectivity changed: AVAILABLE");
-        for (const t of this.Qr) t(0 /* AVAILABLE */);
+    yr() {
+        M("ConnectivityMonitor", "Network connectivity changed: AVAILABLE");
+        for (const t of this.Er) t(0 /* AVAILABLE */);
     }
-    Gr() {
-        O("ConnectivityMonitor", "Network connectivity changed: UNAVAILABLE");
-        for (const t of this.Qr) t(1 /* UNAVAILABLE */);
+    Ir() {
+        M("ConnectivityMonitor", "Network connectivity changed: UNAVAILABLE");
+        for (const t of this.Er) t(1 /* UNAVAILABLE */);
     }
     // TODO(chenbrian): Consider passing in window either into this component or
     // here for testing via FakeWindow.
     /** Checks that all used attributes of window are available. */
-    static vt() {
+    static Vt() {
         return "undefined" != typeof window && void 0 !== window.addEventListener && void 0 !== window.removeEventListener;
     }
 }
@@ -15211,7 +14818,7 @@ class Uo {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const qo = {
+ */ const Po = {
     BatchGetDocuments: "batchGet",
     Commit: "commit",
     RunQuery: "runQuery"
@@ -15243,33 +14850,33 @@ class Uo {
  * bridge to other implementations that are streams but do not implement the
  * interface. The stream callbacks are invoked with the callOn... methods.
  */
-class Ko {
+class bo {
     constructor(t) {
-        this.Wr = t.Wr, this.zr = t.zr;
+        this.Ar = t.Ar, this.Rr = t.Rr;
     }
-    Hr(t) {
-        this.Jr = t;
+    Pr(t) {
+        this.br = t;
     }
-    Yr(t) {
-        this.Xr = t;
+    vr(t) {
+        this.Vr = t;
     }
     onMessage(t) {
-        this.Zr = t;
+        this.Sr = t;
     }
     close() {
-        this.zr();
+        this.Rr();
     }
     send(t) {
-        this.Wr(t);
+        this.Ar(t);
     }
-    eo() {
-        this.Jr();
+    Dr() {
+        this.br();
     }
-    no(t) {
-        this.Xr(t);
+    Cr(t) {
+        this.Vr(t);
     }
-    so(t) {
-        this.Zr(t);
+    Nr(t) {
+        this.Sr(t);
     }
 }
 
@@ -15288,7 +14895,7 @@ class Ko {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Go extends 
+ */ class vo extends 
 /**
  * Base class for all Rest-based connections to the backend (WebChannel and
  * HTTP).
@@ -15297,28 +14904,28 @@ class {
     constructor(t) {
         this.databaseInfo = t, this.databaseId = t.databaseId;
         const e = t.ssl ? "https" : "http";
-        this.io = e + "://" + t.host, this.ro = "projects/" + this.databaseId.projectId + "/databases/" + this.databaseId.database + "/documents";
+        this.kr = e + "://" + t.host, this.Or = "projects/" + this.databaseId.projectId + "/databases/" + this.databaseId.database + "/documents";
     }
-    oo(t, e, n, s, i) {
-        const r = this.uo(t, e);
-        O("RestConnection", "Sending: ", r, n);
+    Mr(t, e, n, s, i) {
+        const r = this.$r(t, e);
+        M("RestConnection", "Sending: ", r, n);
         const o = {};
-        return this.ao(o, s, i), this.co(t, r, o, n).then((t => (O("RestConnection", "Received: ", t), 
+        return this.Fr(o, s, i), this.Br(t, r, o, n).then((t => (M("RestConnection", "Received: ", t), 
         t)), (e => {
-            throw $("RestConnection", `${t} failed with error: `, e, "url: ", r, "request:", n), 
+            throw F("RestConnection", `${t} failed with error: `, e, "url: ", r, "request:", n), 
             e;
         }));
     }
-    ho(t, e, n, s, i) {
+    Lr(t, e, n, s, i) {
         // The REST API automatically aggregates all of the streamed results, so we
         // can just use the normal invoke() method.
-        return this.oo(t, e, n, s, i);
+        return this.Mr(t, e, n, s, i);
     }
     /**
      * Modifies the headers for a request, adding any authorization token if
      * present and any additional headers for the request.
-     */    ao(t, e, n) {
-        t["X-Goog-Api-Client"] = "gl-js/ fire/" + x, 
+     */    Fr(t, e, n) {
+        t["X-Goog-Api-Client"] = "gl-js/ fire/" + N, 
         // Content-Type: text/plain will avoid preflight requests which might
         // mess with CORS and redirects by proxies. If we add custom headers
         // we will need to change this code to potentially use the $httpOverwrite
@@ -15326,16 +14933,16 @@ class {
         t["Content-Type"] = "text/plain", this.databaseInfo.appId && (t["X-Firebase-GMPID"] = this.databaseInfo.appId), 
         e && e.headers.forEach(((e, n) => t[n] = e)), n && n.headers.forEach(((e, n) => t[n] = e));
     }
-    uo(t, e) {
-        const n = qo[t];
-        return `${this.io}/v1/${e}:${n}`;
+    $r(t, e) {
+        const n = Po[t];
+        return `${this.kr}/v1/${e}:${n}`;
     }
 } {
     constructor(t) {
         super(t), this.forceLongPolling = t.forceLongPolling, this.autoDetectLongPolling = t.autoDetectLongPolling, 
         this.useFetchStreams = t.useFetchStreams;
     }
-    co(t, e, n, s) {
+    Br(t, e, n, s) {
         return new Promise(((i, r) => {
             const o = new _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["XhrIo"];
             o.listenOnce(_firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["EventType"].COMPLETE, (() => {
@@ -15343,16 +14950,16 @@ class {
                     switch (o.getLastErrorCode()) {
                       case _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["ErrorCode"].NO_ERROR:
                         const e = o.getResponseJson();
-                        O("Connection", "XHR received:", JSON.stringify(e)), i(e);
+                        M("Connection", "XHR received:", JSON.stringify(e)), i(e);
                         break;
 
                       case _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["ErrorCode"].TIMEOUT:
-                        O("Connection", 'RPC "' + t + '" timed out'), r(new Q(G.DEADLINE_EXCEEDED, "Request time out"));
+                        M("Connection", 'RPC "' + t + '" timed out'), r(new j(G.DEADLINE_EXCEEDED, "Request time out"));
                         break;
 
                       case _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["ErrorCode"].HTTP_ERROR:
                         const n = o.getStatus();
-                        if (O("Connection", 'RPC "' + t + '" failed with status:', n, "response text:", o.getResponseText()), 
+                        if (M("Connection", 'RPC "' + t + '" failed with status:', n, "response text:", o.getResponseText()), 
                         n > 0) {
                             const t = o.getResponseJson().error;
                             if (t && t.status && t.message) {
@@ -15360,27 +14967,27 @@ class {
                                     const e = t.toLowerCase().replace(/_/g, "-");
                                     return Object.values(G).indexOf(e) >= 0 ? e : G.UNKNOWN;
                                 }(t.status);
-                                r(new Q(e, t.message));
-                            } else r(new Q(G.UNKNOWN, "Server responded with status " + o.getStatus()));
+                                r(new j(e, t.message));
+                            } else r(new j(G.UNKNOWN, "Server responded with status " + o.getStatus()));
                         } else 
                         // If we received an HTTP_ERROR but there's no status code,
                         // it's most probably a connection issue
-                        r(new Q(G.UNAVAILABLE, "Connection failed."));
+                        r(new j(G.UNAVAILABLE, "Connection failed."));
                         break;
 
                       default:
                         L();
                     }
                 } finally {
-                    O("Connection", 'RPC "' + t + '" completed.');
+                    M("Connection", 'RPC "' + t + '" completed.');
                 }
             }));
-            const u = JSON.stringify(s);
-            o.send(e, "POST", u, n, 15);
+            const c = JSON.stringify(s);
+            o.send(e, "POST", c, n, 15);
         }));
     }
-    lo(t, e, n) {
-        const s = [ this.io, "/", "google.firestore.v1.Firestore", "/", t, "/channel" ], i = Object(_firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["createWebChannelTransport"])(), r = Object(_firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["getStatEventTarget"])(), o = {
+    Ur(t, e, n) {
+        const s = [ this.kr, "/", "google.firestore.v1.Firestore", "/", t, "/channel" ], i = Object(_firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["createWebChannelTransport"])(), r = Object(_firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["getStatEventTarget"])(), o = {
             // Required for backend stickiness, routing behavior is based on this
             // parameter.
             httpSessionIdParam: "gsessionid",
@@ -15404,7 +15011,7 @@ class {
             forceLongPolling: this.forceLongPolling,
             detectBufferingProxy: this.autoDetectLongPolling
         };
-        this.useFetchStreams && (o.xmlHttpFactory = new _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["FetchXmlHttpFactory"]({})), this.ao(o.initMessageHeaders, e, n), 
+        this.useFetchStreams && (o.xmlHttpFactory = new _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["FetchXmlHttpFactory"]({})), this.Fr(o.initMessageHeaders, e, n), 
         // Sending the custom headers we just added to request.initMessageHeaders
         // (Authorization, etc.) will trigger the browser to make a CORS preflight
         // request because the XHR will no longer meet the criteria for a "simple"
@@ -15421,24 +15028,24 @@ class {
         // known to (sometimes) not include an Origin. See
         // https://github.com/firebase/firebase-js-sdk/issues/1491.
         Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isMobileCordova"])() || Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isReactNative"])() || Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isElectron"])() || Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isIE"])() || Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isUWP"])() || Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["isBrowserExtension"])() || (o.httpHeadersOverwriteParam = "$httpHeaders");
-        const u = s.join("");
-        O("Connection", "Creating WebChannel: " + u, o);
-        const a = i.createWebChannel(u, o);
+        const c = s.join("");
+        M("Connection", "Creating WebChannel: " + c, o);
+        const u = i.createWebChannel(c, o);
         // WebChannel supports sending the first message with the handshake - saving
         // a network round trip. However, it will have to call send in the same
         // JS event loop as open. In order to enforce this, we delay actually
         // opening the WebChannel until send is called. Whether we have called
         // open is tracked with this variable.
-                let c = !1, h = !1;
+                let a = !1, h = !1;
         // A flag to determine whether the stream was closed (by us or through an
         // error/close event) to avoid delivering multiple close events or sending
         // on a closed stream
-                const l = new Ko({
-            Wr: t => {
-                h ? O("Connection", "Not sending because WebChannel is closed:", t) : (c || (O("Connection", "Opening WebChannel transport."), 
-                a.open(), c = !0), O("Connection", "WebChannel sending:", t), a.send(t));
+                const l = new bo({
+            Ar: t => {
+                h ? M("Connection", "Not sending because WebChannel is closed:", t) : (a || (M("Connection", "Opening WebChannel transport."), 
+                u.open(), a = !0), M("Connection", "WebChannel sending:", t), u.send(t));
             },
-            zr: () => a.close()
+            Rr: () => u.close()
         }), y = (t, e, n) => {
             // TODO(dimond): closure typing seems broken because WebChannel does
             // not implement goog.events.Listenable
@@ -15456,13 +15063,13 @@ class {
         // exception and rethrow using a setTimeout so they become visible again.
         // Note that eventually this function could go away if we are confident
         // enough the code is exception free.
-                return y(a, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.OPEN, (() => {
-            h || O("Connection", "WebChannel transport opened.");
-        })), y(a, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.CLOSE, (() => {
-            h || (h = !0, O("Connection", "WebChannel transport closed"), l.no());
-        })), y(a, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.ERROR, (t => {
-            h || (h = !0, $("Connection", "WebChannel transport errored:", t), l.no(new Q(G.UNAVAILABLE, "The operation could not be completed")));
-        })), y(a, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.MESSAGE, (t => {
+                return y(u, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.OPEN, (() => {
+            h || M("Connection", "WebChannel transport opened.");
+        })), y(u, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.CLOSE, (() => {
+            h || (h = !0, M("Connection", "WebChannel transport closed"), l.Cr());
+        })), y(u, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.ERROR, (t => {
+            h || (h = !0, F("Connection", "WebChannel transport errored:", t), l.Cr(new j(G.UNAVAILABLE, "The operation could not be completed")));
+        })), y(u, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["WebChannel"].EventType.MESSAGE, (t => {
             var e;
             if (!h) {
                 const n = t.data[0];
@@ -15474,7 +15081,7 @@ class {
                 // Use any because msgData.error is not typed.
                 const s = n, i = s.error || (null === (e = s[0]) || void 0 === e ? void 0 : e.error);
                 if (i) {
-                    O("Connection", "WebChannel received error:", i);
+                    M("Connection", "WebChannel received error:", i);
                     // error.status will be a string like 'OK' or 'NOT_FOUND'.
                     const t = i.status;
                     let e = 
@@ -15487,22 +15094,22 @@ class {
                     function(t) {
                         // lookup by string
                         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        const e = kn[t];
-                        if (void 0 !== e) return Fn(e);
+                        const e = pn[t];
+                        if (void 0 !== e) return Tn(e);
                     }(t), n = i.message;
                     void 0 === e && (e = G.INTERNAL, n = "Unknown error status: " + t + " with message " + i.message), 
                     // Mark closed so no further events are propagated
-                    h = !0, l.no(new Q(e, n)), a.close();
-                } else O("Connection", "WebChannel received:", n), l.so(n);
+                    h = !0, l.Cr(new j(e, n)), u.close();
+                } else M("Connection", "WebChannel received:", n), l.Nr(n);
             }
         })), y(r, _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["Event"].STAT_EVENT, (t => {
-            t.stat === _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["Stat"].PROXY ? O("Connection", "Detected buffering proxy") : t.stat === _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["Stat"].NOPROXY && O("Connection", "Detected no buffering proxy");
+            t.stat === _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["Stat"].PROXY ? M("Connection", "Detected buffering proxy") : t.stat === _firebase_webchannel_wrapper__WEBPACK_IMPORTED_MODULE_4__["Stat"].NOPROXY && M("Connection", "Detected no buffering proxy");
         })), setTimeout((() => {
             // Technically we could/should wait for the WebChannel opened event,
             // but because we want to send the first message with the WebChannel
             // handshake we pretend the channel opened here (asynchronously), and
             // then delay the actual open until the first message is sent.
-            l.eo();
+            l.Dr();
         }), 0), l;
     }
 }
@@ -15541,13 +15148,13 @@ class {
  * limitations under the License.
  */
 /** The Platform's 'window' implementation or null if not available. */
-function Qo() {
+function Vo() {
     // `window` is not always available, e.g. in ReactNative and WebWorkers.
     // eslint-disable-next-line no-restricted-globals
     return "undefined" != typeof window ? window : null;
 }
 
-/** The Platform's 'document' implementation or null if not available. */ function jo() {
+/** The Platform's 'document' implementation or null if not available. */ function So() {
     // `document` is not always available, e.g. in ReactNative and WebWorkers.
     // eslint-disable-next-line no-restricted-globals
     return "undefined" != typeof document ? document : null;
@@ -15568,8 +15175,8 @@ function Qo() {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ function Wo(t) {
-    return new fs(t, /* useProto3Json= */ !0);
+ */ function Do(t) {
+    return new Hn(t, /* useProto3Json= */ !0);
 }
 
 /**
@@ -15584,7 +15191,7 @@ function Qo() {
  * base delay. This prevents clients from accidentally synchronizing their
  * delays causing spikes of load to the backend.
  */
-class zo {
+class Co {
     constructor(
     /**
      * The AsyncQueue to run backoff operations on.
@@ -15609,10 +15216,10 @@ class zo {
      * Note that jitter will still be applied, so the actual delay could be as
      * much as 1.5*maxDelayMs.
      */ , i = 6e4) {
-        this.Yn = t, this.timerId = e, this.fo = n, this._o = s, this.wo = i, this.mo = 0, 
-        this.yo = null, 
+        this.Sn = t, this.timerId = e, this.qr = n, this.Kr = s, this.Gr = i, this.jr = 0, 
+        this.Qr = null, 
         /** The last backoff attempt, as epoch milliseconds. */
-        this.po = Date.now(), this.reset();
+        this.Wr = Date.now(), this.reset();
     }
     /**
      * Resets the backoff delay.
@@ -15621,40 +15228,40 @@ class zo {
      * (i.e. due to an error), initialDelayMs (plus jitter) will be used, and
      * subsequent ones will increase according to the backoffFactor.
      */    reset() {
-        this.mo = 0;
+        this.jr = 0;
     }
     /**
      * Resets the backoff delay to the maximum delay (e.g. for use after a
      * RESOURCE_EXHAUSTED error).
-     */    Io() {
-        this.mo = this.wo;
+     */    zr() {
+        this.jr = this.Gr;
     }
     /**
      * Returns a promise that resolves after currentDelayMs, and increases the
      * delay for any subsequent attempts. If there was a pending backoff operation
      * already, it will be canceled.
-     */    To(t) {
+     */    Hr(t) {
         // Cancel any pending backoff operation.
         this.cancel();
         // First schedule using the current base (which may be 0 and should be
         // honored as such).
-        const e = Math.floor(this.mo + this.Eo()), n = Math.max(0, Date.now() - this.po), s = Math.max(0, e - n);
+        const e = Math.floor(this.jr + this.Jr()), n = Math.max(0, Date.now() - this.Wr), s = Math.max(0, e - n);
         // Guard against lastAttemptTime being in the future due to a clock change.
-                s > 0 && O("ExponentialBackoff", `Backing off for ${s} ms (base delay: ${this.mo} ms, delay with jitter: ${e} ms, last attempt: ${n} ms ago)`), 
-        this.yo = this.Yn.enqueueAfterDelay(this.timerId, s, (() => (this.po = Date.now(), 
+                s > 0 && M("ExponentialBackoff", `Backing off for ${s} ms (base delay: ${this.jr} ms, delay with jitter: ${e} ms, last attempt: ${n} ms ago)`), 
+        this.Qr = this.Sn.enqueueAfterDelay(this.timerId, s, (() => (this.Wr = Date.now(), 
         t()))), 
         // Apply backoff factor to determine next delay and ensure it is within
         // bounds.
-        this.mo *= this._o, this.mo < this.fo && (this.mo = this.fo), this.mo > this.wo && (this.mo = this.wo);
+        this.jr *= this.Kr, this.jr < this.qr && (this.jr = this.qr), this.jr > this.Gr && (this.jr = this.Gr);
     }
-    Ao() {
-        null !== this.yo && (this.yo.skipDelay(), this.yo = null);
+    Yr() {
+        null !== this.Qr && (this.Qr.skipDelay(), this.Qr = null);
     }
     cancel() {
-        null !== this.yo && (this.yo.cancel(), this.yo = null);
+        null !== this.Qr && (this.Qr.cancel(), this.Qr = null);
     }
-    /** Returns a random value in the range [-currentBaseMs/2, currentBaseMs/2] */    Eo() {
-        return (Math.random() - .5) * this.mo;
+    /** Returns a random value in the range [-currentBaseMs/2, currentBaseMs/2] */    Jr() {
+        return (Math.random() - .5) * this.jr;
     }
 }
 
@@ -15706,16 +15313,16 @@ class zo {
  *    connection stream
  *  ListenerType: The type of the listener that will be used for callbacks
  */
-class Ho {
-    constructor(t, e, n, s, i, r, o, u) {
-        this.Yn = t, this.Ro = n, this.Po = s, this.bo = i, this.authCredentialsProvider = r, 
-        this.appCheckCredentialsProvider = o, this.listener = u, this.state = 0 /* Initial */ , 
+class No {
+    constructor(t, e, n, s, i, r, o, c) {
+        this.Sn = t, this.Xr = n, this.Zr = s, this.eo = i, this.authCredentialsProvider = r, 
+        this.appCheckCredentialsProvider = o, this.listener = c, this.state = 0 /* Initial */ , 
         /**
          * A close count that's incremented every time the stream is closed; used by
          * getCloseGuardedDispatcher() to invalidate callbacks that happen after
          * close.
          */
-        this.Vo = 0, this.vo = null, this.So = null, this.stream = null, this.Do = new zo(t, e);
+        this.no = 0, this.so = null, this.io = null, this.stream = null, this.ro = new Co(t, e);
     }
     /**
      * Returns true if start() has been called and no error has occurred. True
@@ -15723,13 +15330,13 @@ class Ho {
      * encompasses respecting backoff, getting auth tokens, and starting the
      * actual RPC). Use isOpen() to determine if the stream is open and ready for
      * outbound requests.
-     */    Co() {
-        return 1 /* Starting */ === this.state || 5 /* Backoff */ === this.state || this.xo();
+     */    oo() {
+        return 1 /* Starting */ === this.state || 5 /* Backoff */ === this.state || this.co();
     }
     /**
      * Returns true if the underlying RPC is open (the onOpen() listener has been
      * called) and the stream is ready for outbound requests.
-     */    xo() {
+     */    co() {
         return 2 /* Open */ === this.state || 3 /* Healthy */ === this.state;
     }
     /**
@@ -15739,7 +15346,7 @@ class Ho {
      *
      * When start returns, isStarted() will return true.
      */    start() {
-        4 /* Error */ !== this.state ? this.auth() : this.No();
+        4 /* Error */ !== this.state ? this.auth() : this.uo();
     }
     /**
      * Stops the RPC. This call is idempotent and allowed regardless of the
@@ -15747,7 +15354,7 @@ class Ho {
      *
      * When stop returns, isStarted() and isOpen() will both return false.
      */    async stop() {
-        this.Co() && await this.close(0 /* Initial */);
+        this.oo() && await this.close(0 /* Initial */);
     }
     /**
      * After an error the stream will usually back off on the next attempt to
@@ -15756,8 +15363,8 @@ class Ho {
      *
      * Each error will call the onClose() listener. That function can decide to
      * inhibit backoff if required.
-     */    ko() {
-        this.state = 0 /* Initial */ , this.Do.reset();
+     */    ao() {
+        this.state = 0 /* Initial */ , this.ro.reset();
     }
     /**
      * Marks this stream as idle. If no further actions are performed on the
@@ -15768,25 +15375,25 @@ class Ho {
      *
      * Only streams that are in state 'Open' can be marked idle, as all other
      * states imply pending network operations.
-     */    Mo() {
+     */    ho() {
         // Starts the idle time if we are in state 'Open' and are not yet already
         // running a timer (in which case the previous idle timeout still applies).
-        this.xo() && null === this.vo && (this.vo = this.Yn.enqueueAfterDelay(this.Ro, 6e4, (() => this.Oo())));
+        this.co() && null === this.so && (this.so = this.Sn.enqueueAfterDelay(this.Xr, 6e4, (() => this.lo())));
     }
-    /** Sends a message to the underlying stream. */    Fo(t) {
-        this.$o(), this.stream.send(t);
+    /** Sends a message to the underlying stream. */    fo(t) {
+        this._o(), this.stream.send(t);
     }
-    /** Called by the idle timer when the stream should close due to inactivity. */    async Oo() {
-        if (this.xo()) 
+    /** Called by the idle timer when the stream should close due to inactivity. */    async lo() {
+        if (this.co()) 
         // When timing out an idle stream there's no reason to force the stream into backoff when
         // it restarts so set the stream state to Initial instead of Error.
         return this.close(0 /* Initial */);
     }
-    /** Marks the stream as active again. */    $o() {
-        this.vo && (this.vo.cancel(), this.vo = null);
+    /** Marks the stream as active again. */    _o() {
+        this.so && (this.so.cancel(), this.so = null);
     }
-    /** Cancels the health check delayed operation. */    Bo() {
-        this.So && (this.So.cancel(), this.So = null);
+    /** Cancels the health check delayed operation. */    wo() {
+        this.io && (this.io.cancel(), this.io = null);
     }
     /**
      * Closes the stream and cleans up as necessary:
@@ -15802,15 +15409,15 @@ class Ho {
      * @param error - the error the connection was closed with.
      */    async close(t, e) {
         // Cancel any outstanding timers (they're guaranteed not to execute).
-        this.$o(), this.Bo(), this.Do.cancel(), 
+        this._o(), this.wo(), this.ro.cancel(), 
         // Invalidates any stream-related callbacks (e.g. from auth or the
         // underlying stream), guaranteeing they won't execute.
-        this.Vo++, 4 /* Error */ !== t ? 
+        this.no++, 4 /* Error */ !== t ? 
         // If this is an intentional close ensure we don't delay our next connection attempt.
-        this.Do.reset() : e && e.code === G.RESOURCE_EXHAUSTED ? (
+        this.ro.reset() : e && e.code === G.RESOURCE_EXHAUSTED ? (
         // Log the error. (Probably either 'quota exceeded' or 'max queue length reached'.)
-        F(e.toString()), F("Using maximum backoff delay to prevent overloading the backend."), 
-        this.Do.Io()) : e && e.code === G.UNAUTHENTICATED && 3 /* Healthy */ !== this.state && (
+        $(e.toString()), $("Using maximum backoff delay to prevent overloading the backend."), 
+        this.ro.zr()) : e && e.code === G.UNAUTHENTICATED && 3 /* Healthy */ !== this.state && (
         // "unauthenticated" error means the token was rejected. This should rarely
         // happen since both Auth and AppCheck ensure a sufficient TTL when we
         // request a token. If a user manually resets their system clock this can
@@ -15819,70 +15426,70 @@ class Ho {
         // to ensure that we fetch a new token.
         this.authCredentialsProvider.invalidateToken(), this.appCheckCredentialsProvider.invalidateToken()), 
         // Clean up the underlying stream because we are no longer interested in events.
-        null !== this.stream && (this.Lo(), this.stream.close(), this.stream = null), 
+        null !== this.stream && (this.mo(), this.stream.close(), this.stream = null), 
         // This state must be assigned before calling onClose() to allow the callback to
         // inhibit backoff or otherwise manipulate the state in its non-started state.
         this.state = t, 
         // Notify the listener that the stream closed.
-        await this.listener.Yr(e);
+        await this.listener.vr(e);
     }
     /**
      * Can be overridden to perform additional cleanup before the stream is closed.
      * Calling super.tearDown() is not required.
-     */    Lo() {}
+     */    mo() {}
     auth() {
         this.state = 1 /* Starting */;
-        const t = this.Uo(this.Vo), e = this.Vo;
+        const t = this.yo(this.no), e = this.no;
         // TODO(mikelehen): Just use dispatchIfNotClosed, but see TODO below.
                 Promise.all([ this.authCredentialsProvider.getToken(), this.appCheckCredentialsProvider.getToken() ]).then((([t, n]) => {
             // Stream can be stopped while waiting for authentication.
             // TODO(mikelehen): We really should just use dispatchIfNotClosed
             // and let this dispatch onto the queue, but that opened a spec test can
             // of worms that I don't want to deal with in this PR.
-            this.Vo === e && 
+            this.no === e && 
             // Normally we'd have to schedule the callback on the AsyncQueue.
             // However, the following calls are safe to be called outside the
             // AsyncQueue since they don't chain asynchronous calls
-            this.qo(t, n);
+            this.po(t, n);
         }), (e => {
             t((() => {
-                const t = new Q(G.UNKNOWN, "Fetching auth token failed: " + e.message);
-                return this.Ko(t);
+                const t = new j(G.UNKNOWN, "Fetching auth token failed: " + e.message);
+                return this.Io(t);
             }));
         }));
     }
-    qo(t, e) {
-        const n = this.Uo(this.Vo);
-        this.stream = this.Go(t, e), this.stream.Hr((() => {
-            n((() => (this.state = 2 /* Open */ , this.So = this.Yn.enqueueAfterDelay(this.Po, 1e4, (() => (this.xo() && (this.state = 3 /* Healthy */), 
-            Promise.resolve()))), this.listener.Hr())));
-        })), this.stream.Yr((t => {
-            n((() => this.Ko(t)));
+    po(t, e) {
+        const n = this.yo(this.no);
+        this.stream = this.Eo(t, e), this.stream.Pr((() => {
+            n((() => (this.state = 2 /* Open */ , this.io = this.Sn.enqueueAfterDelay(this.Zr, 1e4, (() => (this.co() && (this.state = 3 /* Healthy */), 
+            Promise.resolve()))), this.listener.Pr())));
+        })), this.stream.vr((t => {
+            n((() => this.Io(t)));
         })), this.stream.onMessage((t => {
             n((() => this.onMessage(t)));
         }));
     }
-    No() {
-        this.state = 5 /* Backoff */ , this.Do.To((async () => {
+    uo() {
+        this.state = 5 /* Backoff */ , this.ro.Hr((async () => {
             this.state = 0 /* Initial */ , this.start();
         }));
     }
     // Visible for tests
-    Ko(t) {
+    Io(t) {
         // In theory the stream could close cleanly, however, in our current model
         // we never expect this to happen because if we stop a stream ourselves,
         // this callback will never be called. To prevent cases where we retry
         // without a backoff accidentally, we set the stream to error in all cases.
-        return O("PersistentStream", `close with error: ${t}`), this.stream = null, this.close(4 /* Error */ , t);
+        return M("PersistentStream", `close with error: ${t}`), this.stream = null, this.close(4 /* Error */ , t);
     }
     /**
      * Returns a "dispatcher" function that dispatches operations onto the
      * AsyncQueue but only runs them if closeCount remains unchanged. This allows
      * us to turn auth / stream callbacks into no-ops if the stream is closed /
      * re-opened, etc.
-     */    Uo(t) {
+     */    yo(t) {
         return e => {
-            this.Yn.enqueueAndForget((() => this.Vo === t ? e() : (O("PersistentStream", "stream callback skipped by getCloseGuardedDispatcher."), 
+            this.Sn.enqueueAndForget((() => this.no === t ? e() : (M("PersistentStream", "stream callback skipped by getCloseGuardedDispatcher."), 
             Promise.resolve())));
         };
     }
@@ -15894,56 +15501,56 @@ class Ho {
  * Once the Listen stream has called the onOpen() listener, any number of
  * listen() and unlisten() calls can be made to control what changes will be
  * sent from the server for ListenResponses.
- */ class Jo extends Ho {
+ */ class xo extends No {
     constructor(t, e, n, s, i, r) {
         super(t, "listen_stream_connection_backoff" /* ListenStreamConnectionBackoff */ , "listen_stream_idle" /* ListenStreamIdle */ , "health_check_timeout" /* HealthCheckTimeout */ , e, n, s, r), 
-        this.M = i;
+        this.O = i;
     }
-    Go(t, e) {
-        return this.bo.lo("Listen", t, e);
+    Eo(t, e) {
+        return this.eo.Ur("Listen", t, e);
     }
     onMessage(t) {
         // A successful response means the stream is healthy
-        this.Do.reset();
-        const e = vs(this.M, t), n = function(t) {
+        this.ro.reset();
+        const e = ls(this.O, t), n = function(t) {
             // We have only reached a consistent snapshot for the entire stream if there
             // is a read_time set and it applies to all targets (i.e. the list of
             // targets is empty). The backend is guaranteed to send such responses.
-            if (!("targetChange" in t)) return ct.min();
+            if (!("targetChange" in t)) return at.min();
             const e = t.targetChange;
-            return e.targetIds && e.targetIds.length ? ct.min() : e.readTime ? ms(e.readTime) : ct.min();
+            return e.targetIds && e.targetIds.length ? at.min() : e.readTime ? Zn(e.readTime) : at.min();
         }(t);
-        return this.listener.Qo(e, n);
+        return this.listener.To(e, n);
     }
     /**
      * Registers interest in the results of the given target. If the target
      * includes a resumeToken it will be included in the request. Results that
      * affect the target will be streamed back as WatchChange messages that
      * reference the targetId.
-     */    jo(t) {
+     */    Ao(t) {
         const e = {};
-        e.database = As(this.M), e.addTarget = function(t, e) {
+        e.database = os(this.O), e.addTarget = function(t, e) {
             let n;
             const s = e.target;
-            return n = ge(s) ? {
-                documents: xs(t, s)
+            return n = oe(s) ? {
+                documents: ws(t, s)
             } : {
-                query: Ns(t, s)
-            }, n.targetId = e.targetId, e.resumeToken.approximateByteSize() > 0 ? n.resumeToken = _s(t, e.resumeToken) : e.snapshotVersion.compareTo(ct.min()) > 0 && (
+                query: ms(t, s)
+            }, n.targetId = e.targetId, e.resumeToken.approximateByteSize() > 0 ? n.resumeToken = Yn(t, e.resumeToken) : e.snapshotVersion.compareTo(at.min()) > 0 && (
             // TODO(wuandy): Consider removing above check because it is most likely true.
             // Right now, many tests depend on this behaviour though (leaving min() out
             // of serialization).
-            n.readTime = ds(t, e.snapshotVersion.toTimestamp())), n;
-        }(this.M, t);
-        const n = Ms(this.M, t);
-        n && (e.labels = n), this.Fo(e);
+            n.readTime = Jn(t, e.snapshotVersion.toTimestamp())), n;
+        }(this.O, t);
+        const n = ys(this.O, t);
+        n && (e.labels = n), this.fo(e);
     }
     /**
      * Unregisters interest in the results of the target associated with the
      * given targetId.
-     */    Wo(t) {
+     */    Ro(t) {
         const e = {};
-        e.database = As(this.M), e.removeTarget = t, this.Fo(e);
+        e.database = os(this.O), e.removeTarget = t, this.fo(e);
     }
 }
 
@@ -15963,57 +15570,57 @@ class Ho {
  * okay to use the same streamToken for the calls to writeMutations.
  *
  * TODO(b/33271235): Use proto types
- */ class Yo extends Ho {
+ */ class ko extends No {
     constructor(t, e, n, s, i, r) {
         super(t, "write_stream_connection_backoff" /* WriteStreamConnectionBackoff */ , "write_stream_idle" /* WriteStreamIdle */ , "health_check_timeout" /* HealthCheckTimeout */ , e, n, s, r), 
-        this.M = i, this.zo = !1;
+        this.O = i, this.Po = !1;
     }
     /**
      * Tracks whether or not a handshake has been successfully exchanged and
      * the stream is ready to accept mutations.
-     */    get Ho() {
-        return this.zo;
+     */    get bo() {
+        return this.Po;
     }
     // Override of PersistentStream.start
     start() {
-        this.zo = !1, this.lastStreamToken = void 0, super.start();
+        this.Po = !1, this.lastStreamToken = void 0, super.start();
     }
-    Lo() {
-        this.zo && this.Jo([]);
+    mo() {
+        this.Po && this.vo([]);
     }
-    Go(t, e) {
-        return this.bo.lo("Write", t, e);
+    Eo(t, e) {
+        return this.eo.Ur("Write", t, e);
     }
     onMessage(t) {
         if (
         // Always capture the last stream token.
-        U(!!t.streamToken), this.lastStreamToken = t.streamToken, this.zo) {
+        U(!!t.streamToken), this.lastStreamToken = t.streamToken, this.Po) {
             // A successful first write response means the stream is healthy,
             // Note, that we could consider a successful handshake healthy, however,
             // the write itself might be causing an error we want to back off from.
-            this.Do.reset();
-            const e = Cs(t.writeResults, t.commitTime), n = ms(t.commitTime);
-            return this.listener.Yo(n, e);
+            this.ro.reset();
+            const e = _s(t.writeResults, t.commitTime), n = Zn(t.commitTime);
+            return this.listener.Vo(n, e);
         }
         // The first response is always the handshake response
-        return U(!t.writeResults || 0 === t.writeResults.length), this.zo = !0, this.listener.Xo();
+        return U(!t.writeResults || 0 === t.writeResults.length), this.Po = !0, this.listener.So();
     }
     /**
      * Sends an initial streamToken to the server, performing the handshake
      * required to make the StreamingWrite RPC work. Subsequent
      * calls should wait until onHandshakeComplete was called.
-     */    Zo() {
+     */    Do() {
         // TODO(dimond): Support stream resumption. We intentionally do not set the
         // stream token on the handshake, ignoring any stream token we might have.
         const t = {};
-        t.database = As(this.M), this.Fo(t);
+        t.database = os(this.O), this.fo(t);
     }
-    /** Sends a group of mutations to the Firestore backend to apply. */    Jo(t) {
+    /** Sends a group of mutations to the Firestore backend to apply. */    vo(t) {
         const e = {
             streamToken: this.lastStreamToken,
-            writes: t.map((t => Ss(this.M, t)))
+            writes: t.map((t => fs(this.O, t)))
         };
-        this.Fo(e);
+        this.fo(e);
     }
 }
 
@@ -16042,28 +15649,28 @@ class Ho {
  * An implementation of Datastore that exposes additional state for internal
  * consumption.
  */
-class Xo extends class {} {
+class Oo extends class {} {
     constructor(t, e, n, s) {
-        super(), this.authCredentials = t, this.appCheckCredentials = e, this.bo = n, this.M = s, 
-        this.tu = !1;
+        super(), this.authCredentials = t, this.appCheckCredentials = e, this.eo = n, this.O = s, 
+        this.Co = !1;
     }
-    eu() {
-        if (this.tu) throw new Q(G.FAILED_PRECONDITION, "The client has already been terminated.");
+    No() {
+        if (this.Co) throw new j(G.FAILED_PRECONDITION, "The client has already been terminated.");
     }
-    /** Invokes the provided RPC with auth and AppCheck tokens. */    oo(t, e, n) {
-        return this.eu(), Promise.all([ this.authCredentials.getToken(), this.appCheckCredentials.getToken() ]).then((([s, i]) => this.bo.oo(t, e, n, s, i))).catch((t => {
+    /** Invokes the provided RPC with auth and AppCheck tokens. */    Mr(t, e, n) {
+        return this.No(), Promise.all([ this.authCredentials.getToken(), this.appCheckCredentials.getToken() ]).then((([s, i]) => this.eo.Mr(t, e, n, s, i))).catch((t => {
             throw "FirebaseError" === t.name ? (t.code === G.UNAUTHENTICATED && (this.authCredentials.invalidateToken(), 
-            this.appCheckCredentials.invalidateToken()), t) : new Q(G.UNKNOWN, t.toString());
+            this.appCheckCredentials.invalidateToken()), t) : new j(G.UNKNOWN, t.toString());
         }));
     }
-    /** Invokes the provided RPC with streamed results with auth and AppCheck tokens. */    ho(t, e, n) {
-        return this.eu(), Promise.all([ this.authCredentials.getToken(), this.appCheckCredentials.getToken() ]).then((([s, i]) => this.bo.ho(t, e, n, s, i))).catch((t => {
+    /** Invokes the provided RPC with streamed results with auth and AppCheck tokens. */    Lr(t, e, n) {
+        return this.No(), Promise.all([ this.authCredentials.getToken(), this.appCheckCredentials.getToken() ]).then((([s, i]) => this.eo.Lr(t, e, n, s, i))).catch((t => {
             throw "FirebaseError" === t.name ? (t.code === G.UNAUTHENTICATED && (this.authCredentials.invalidateToken(), 
-            this.appCheckCredentials.invalidateToken()), t) : new Q(G.UNKNOWN, t.toString());
+            this.appCheckCredentials.invalidateToken()), t) : new j(G.UNKNOWN, t.toString());
         }));
     }
     terminate() {
-        this.tu = !0;
+        this.Co = !0;
     }
 }
 
@@ -16080,7 +15687,7 @@ class Xo extends class {} {
  * then we set the OnlineState to Offline, and the client will behave as if
  * it is offline (get()s will return cached data, etc.).
  */
-class Zo {
+class Mo {
     constructor(t, e) {
         this.asyncQueue = t, this.onlineStateHandler = e, 
         /** The current OnlineState. */
@@ -16090,19 +15697,19 @@ class Zo {
          * maximum defined by MAX_WATCH_STREAM_FAILURES, we'll set the OnlineState to
          * Offline.
          */
-        this.nu = 0, 
+        this.xo = 0, 
         /**
          * A timer that elapses after ONLINE_STATE_TIMEOUT_MS, at which point we
          * transition from OnlineState.Unknown to OnlineState.Offline without waiting
          * for the stream to actually fail (MAX_WATCH_STREAM_FAILURES times).
          */
-        this.su = null, 
+        this.ko = null, 
         /**
          * Whether the client should log a warning message if it fails to connect to
          * the backend (initially true, cleared after a successful stream, or if we've
          * logged the message already).
          */
-        this.iu = !0;
+        this.Oo = !0;
     }
     /**
      * Called by RemoteStore when a watch stream is started (including on each
@@ -16110,9 +15717,9 @@ class Zo {
      *
      * If this is the first attempt, it sets the OnlineState to Unknown and starts
      * the onlineStateTimer.
-     */    ru() {
-        0 === this.nu && (this.ou("Unknown" /* Unknown */), this.su = this.asyncQueue.enqueueAfterDelay("online_state_timeout" /* OnlineStateTimeout */ , 1e4, (() => (this.su = null, 
-        this.uu("Backend didn't respond within 10 seconds."), this.ou("Offline" /* Offline */), 
+     */    Mo() {
+        0 === this.xo && (this.$o("Unknown" /* Unknown */), this.ko = this.asyncQueue.enqueueAfterDelay("online_state_timeout" /* OnlineStateTimeout */ , 1e4, (() => (this.ko = null, 
+        this.Fo("Backend didn't respond within 10 seconds."), this.$o("Offline" /* Offline */), 
         Promise.resolve()))));
     }
     /**
@@ -16120,10 +15727,10 @@ class Zo {
      * failure. The first failure moves us to the 'Unknown' state. We then may
      * allow multiple failures (based on MAX_WATCH_STREAM_FAILURES) before we
      * actually transition to the 'Offline' state.
-     */    au(t) {
-        "Online" /* Online */ === this.state ? this.ou("Unknown" /* Unknown */) : (this.nu++, 
-        this.nu >= 1 && (this.cu(), this.uu(`Connection failed 1 times. Most recent error: ${t.toString()}`), 
-        this.ou("Offline" /* Offline */)));
+     */    Bo(t) {
+        "Online" /* Online */ === this.state ? this.$o("Unknown" /* Unknown */) : (this.xo++, 
+        this.xo >= 1 && (this.Lo(), this.Fo(`Connection failed 1 times. Most recent error: ${t.toString()}`), 
+        this.$o("Offline" /* Offline */)));
     }
     /**
      * Explicitly sets the OnlineState to the specified state.
@@ -16132,20 +15739,20 @@ class Zo {
      * Offline heuristics, so must not be used in place of
      * handleWatchStreamStart() and handleWatchStreamFailure().
      */    set(t) {
-        this.cu(), this.nu = 0, "Online" /* Online */ === t && (
+        this.Lo(), this.xo = 0, "Online" /* Online */ === t && (
         // We've connected to watch at least once. Don't warn the developer
         // about being offline going forward.
-        this.iu = !1), this.ou(t);
+        this.Oo = !1), this.$o(t);
     }
-    ou(t) {
+    $o(t) {
         t !== this.state && (this.state = t, this.onlineStateHandler(t));
     }
-    uu(t) {
+    Fo(t) {
         const e = `Could not reach Cloud Firestore backend. ${t}\nThis typically indicates that your device does not have a healthy Internet connection at the moment. The client will operate in offline mode until it is able to successfully connect to the backend.`;
-        this.iu ? (F(e), this.iu = !1) : O("OnlineStateTracker", e);
+        this.Oo ? ($(e), this.Oo = !1) : M("OnlineStateTracker", e);
     }
-    cu() {
-        null !== this.su && (this.su.cancel(), this.su = null);
+    Lo() {
+        null !== this.ko && (this.ko.cancel(), this.ko = null);
     }
 }
 
@@ -16164,7 +15771,7 @@ class Zo {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class tu {
+ */ class $o {
     constructor(
     /**
      * The local store, used to fill the write pipeline with outbound mutations.
@@ -16190,7 +15797,7 @@ class Zo {
          * purely based on order, and so we can just shift() writes from the front of
          * the writePipeline as we receive responses.
          */
-        this.hu = [], 
+        this.Uo = [], 
         /**
          * A mapping of watched targets that the client cares about tracking and the
          * user has explicitly called a 'listen' for this target.
@@ -16200,12 +15807,12 @@ class Zo {
          * to the server. The targets removed with unlistens are removed eagerly
          * without waiting for confirmation from the listen stream.
          */
-        this.lu = new Map, 
+        this.qo = new Map, 
         /**
          * A set of reasons for why the RemoteStore may be offline. If empty, the
          * RemoteStore may start its network connections.
          */
-        this.fu = new Set, 
+        this.Ko = new Set, 
         /**
          * Event handlers that get called when the network is disabled or enabled.
          *
@@ -16213,115 +15820,115 @@ class Zo {
          * underlying streams (to support tree-shakeable streams). On Android and iOS,
          * the streams are created during construction of RemoteStore.
          */
-        this.du = [], this._u = i, this._u.Lr((t => {
+        this.Go = [], this.jo = i, this.jo.mr((t => {
             n.enqueueAndForget((async () => {
                 // Porting Note: Unlike iOS, `restartNetwork()` is called even when the
                 // network becomes unreachable as we don't have any other way to tear
                 // down our streams.
-                cu(this) && (O("RemoteStore", "Restarting streams for network reachability change."), 
+                Qo(this) && (M("RemoteStore", "Restarting streams for network reachability change."), 
                 await async function(t) {
                     const e = K(t);
-                    e.fu.add(4 /* ConnectivityChange */), await nu(e), e.wu.set("Unknown" /* Unknown */), 
-                    e.fu.delete(4 /* ConnectivityChange */), await eu(e);
+                    e.Ko.add(4 /* ConnectivityChange */), await Bo(e), e.Qo.set("Unknown" /* Unknown */), 
+                    e.Ko.delete(4 /* ConnectivityChange */), await Fo(e);
                 }(this));
             }));
-        })), this.wu = new Zo(n, s);
+        })), this.Qo = new Mo(n, s);
     }
 }
 
-async function eu(t) {
-    if (cu(t)) for (const e of t.du) await e(/* enabled= */ !0);
+async function Fo(t) {
+    if (Qo(t)) for (const e of t.Go) await e(/* enabled= */ !0);
 }
 
 /**
  * Temporarily disables the network. The network can be re-enabled using
  * enableNetwork().
- */ async function nu(t) {
-    for (const e of t.du) await e(/* enabled= */ !1);
+ */ async function Bo(t) {
+    for (const e of t.Go) await e(/* enabled= */ !1);
 }
 
 /**
  * Starts new listen for the given target. Uses resume token if provided. It
  * is a no-op if the target of given `TargetData` is already being listened to.
  */
-function su(t, e) {
+function Lo(t, e) {
     const n = K(t);
-    n.lu.has(e.targetId) || (
+    n.qo.has(e.targetId) || (
     // Mark this as something the client is currently listening for.
-    n.lu.set(e.targetId, e), au(n) ? 
+    n.qo.set(e.targetId, e), jo(n) ? 
     // The listen will be sent in onWatchStreamOpen
-    uu(n) : Vu(n).xo() && ru(n, e));
+    Go(n) : hc(n).co() && qo(n, e));
 }
 
 /**
  * Removes the listen from server. It is a no-op if the given target id is
  * not being listened to.
- */ function iu(t, e) {
-    const n = K(t), s = Vu(n);
-    n.lu.delete(e), s.xo() && ou(n, e), 0 === n.lu.size && (s.xo() ? s.Mo() : cu(n) && 
+ */ function Uo(t, e) {
+    const n = K(t), s = hc(n);
+    n.qo.delete(e), s.co() && Ko(n, e), 0 === n.qo.size && (s.co() ? s.ho() : Qo(n) && 
     // Revert to OnlineState.Unknown if the watch stream is not open and we
     // have no listeners, since without any listens to send we cannot
     // confirm if the stream is healthy and upgrade to OnlineState.Online.
-    n.wu.set("Unknown" /* Unknown */));
+    n.Qo.set("Unknown" /* Unknown */));
 }
 
 /**
  * We need to increment the the expected number of pending responses we're due
  * from watch so we wait for the ack to process any messages from this target.
- */ function ru(t, e) {
-    t.mu.Z(e.targetId), Vu(t).jo(e);
+ */ function qo(t, e) {
+    t.Wo.Z(e.targetId), hc(t).Ao(e);
 }
 
 /**
  * We need to increment the expected number of pending responses we're due
  * from watch so we wait for the removal on the server before we process any
  * messages from this target.
- */ function ou(t, e) {
-    t.mu.Z(e), Vu(t).Wo(e);
+ */ function Ko(t, e) {
+    t.Wo.Z(e), hc(t).Ro(e);
 }
 
-function uu(t) {
-    t.mu = new us({
+function Go(t) {
+    t.Wo = new Gn({
         getRemoteKeysForTarget: e => t.remoteSyncer.getRemoteKeysForTarget(e),
-        Et: e => t.lu.get(e) || null
-    }), Vu(t).start(), t.wu.ru();
+        Tt: e => t.qo.get(e) || null
+    }), hc(t).start(), t.Qo.Mo();
 }
 
 /**
  * Returns whether the watch stream should be started because it's necessary
  * and has not yet been started.
- */ function au(t) {
-    return cu(t) && !Vu(t).Co() && t.lu.size > 0;
+ */ function jo(t) {
+    return Qo(t) && !hc(t).oo() && t.qo.size > 0;
 }
 
-function cu(t) {
-    return 0 === K(t).fu.size;
+function Qo(t) {
+    return 0 === K(t).Ko.size;
 }
 
-function hu(t) {
-    t.mu = void 0;
+function Wo(t) {
+    t.Wo = void 0;
 }
 
-async function lu(t) {
-    t.lu.forEach(((e, n) => {
-        ru(t, e);
+async function zo(t) {
+    t.qo.forEach(((e, n) => {
+        qo(t, e);
     }));
 }
 
-async function fu(t, e) {
-    hu(t), 
+async function Ho(t, e) {
+    Wo(t), 
     // If we still need the watch stream, retry the connection.
-    au(t) ? (t.wu.au(e), uu(t)) : 
+    jo(t) ? (t.Qo.Bo(e), Go(t)) : 
     // No need to restart watch stream because there are no active targets.
     // The online state is set to unknown because there is no active attempt
     // at establishing a connection
-    t.wu.set("Unknown" /* Unknown */);
+    t.Qo.set("Unknown" /* Unknown */);
 }
 
-async function du(t, e, n) {
+async function Jo(t, e, n) {
     if (
     // Mark the client as online since we got a message from the server
-    t.wu.set("Online" /* Online */), e instanceof rs && 2 /* Removed */ === e.state && e.cause) 
+    t.Qo.set("Online" /* Online */), e instanceof qn && 2 /* Removed */ === e.state && e.cause) 
     // There was an error on a target, don't wait for a consistent snapshot
     // to raise events
     try {
@@ -16331,7 +15938,7 @@ async function du(t, e, n) {
             const n = e.cause;
             for (const s of e.targetIds) 
             // A watched target might have been removed already.
-            t.lu.has(s) && (await t.remoteSyncer.rejectListen(s, n), t.lu.delete(s), t.mu.removeTarget(s));
+            t.qo.has(s) && (await t.remoteSyncer.rejectListen(s, n), t.qo.delete(s), t.Wo.removeTarget(s));
         }
         /**
  * Attempts to fill our write pipeline with writes from the LocalStore.
@@ -16342,11 +15949,11 @@ async function du(t, e, n) {
  * Starts the write stream if necessary.
  */ (t, e);
     } catch (n) {
-        O("RemoteStore", "Failed to remove targets %s: %s ", e.targetIds.join(","), n), 
-        await _u(t, n);
-    } else if (e instanceof ss ? t.mu.ut(e) : e instanceof is ? t.mu._t(e) : t.mu.ht(e), 
-    !n.isEqual(ct.min())) try {
-        const e = await oo(t.localStore);
+        M("RemoteStore", "Failed to remove targets %s: %s ", e.targetIds.join(","), n), 
+        await Yo(t, n);
+    } else if (e instanceof Ln ? t.Wo.ct(e) : e instanceof Un ? t.Wo._t(e) : t.Wo.ht(e), 
+    !n.isEqual(at.min())) try {
+        const e = await Kr(t.localStore);
         n.compareTo(e) >= 0 && 
         // We have received a target change with a global snapshot if the snapshot
         // version is not equal to SnapshotVersion.min().
@@ -16357,39 +15964,39 @@ async function du(t, e, n) {
  * SyncEngine.
  */
         function(t, e) {
-            const n = t.mu.yt(e);
+            const n = t.Wo.yt(e);
             // Update in-memory resume tokens. LocalStore will update the
             // persistent view of these when applying the completed RemoteEvent.
                         return n.targetChanges.forEach(((n, s) => {
                 if (n.resumeToken.approximateByteSize() > 0) {
-                    const i = t.lu.get(s);
+                    const i = t.qo.get(s);
                     // A watched target might have been removed already.
-                                        i && t.lu.set(s, i.withResumeToken(n.resumeToken, e));
+                                        i && t.qo.set(s, i.withResumeToken(n.resumeToken, e));
                 }
             })), 
             // Re-establish listens for the targets that have been invalidated by
             // existence filter mismatches.
             n.targetMismatches.forEach((e => {
-                const n = t.lu.get(e);
+                const n = t.qo.get(e);
                 if (!n) 
                 // A watched target might have been removed already.
                 return;
                 // Clear the resume token for the target, since we're in a known mismatch
                 // state.
-                                t.lu.set(e, n.withResumeToken(pt.EMPTY_BYTE_STRING, n.snapshotVersion)), 
+                                t.qo.set(e, n.withResumeToken(pt.EMPTY_BYTE_STRING, n.snapshotVersion)), 
                 // Cause a hard reset by unwatching and rewatching immediately, but
                 // deliberately don't send a resume token so that we get a full update.
-                ou(t, e);
+                Ko(t, e);
                 // Mark the target we send as being on behalf of an existence filter
                 // mismatch, but don't actually retain that in listenTargets. This ensures
                 // that we flag the first re-listen this way without impacting future
                 // listens of this target (that might happen e.g. on reconnect).
-                const s = new ki(n.target, e, 1 /* ExistenceFilterMismatch */ , n.sequenceNumber);
-                ru(t, s);
+                const s = new yi(n.target, e, 1 /* ExistenceFilterMismatch */ , n.sequenceNumber);
+                qo(t, s);
             })), t.remoteSyncer.applyRemoteEvent(n);
         }(t, n);
     } catch (e) {
-        O("RemoteStore", "Failed to raise snapshot:", e), await _u(t, e);
+        M("RemoteStore", "Failed to raise snapshot:", e), await Yo(t, e);
     }
 }
 
@@ -16401,133 +16008,133 @@ async function du(t, e, n) {
  *
  * The returned Promise is resolved once the network is disabled and before
  * any retry attempt.
- */ async function _u(t, e, n) {
-    if (!Ri(e)) throw e;
-    t.fu.add(1 /* IndexedDbFailed */), 
+ */ async function Yo(t, e, n) {
+    if (!ui(e)) throw e;
+    t.Ko.add(1 /* IndexedDbFailed */), 
     // Disable network and raise offline snapshots
-    await nu(t), t.wu.set("Offline" /* Offline */), n || (
+    await Bo(t), t.Qo.set("Offline" /* Offline */), n || (
     // Use a simple read operation to determine if IndexedDB recovered.
     // Ideally, we would expose a health check directly on SimpleDb, but
     // RemoteStore only has access to persistence through LocalStore.
-    n = () => oo(t.localStore)), 
+    n = () => Kr(t.localStore)), 
     // Probe IndexedDB periodically and re-enable network
     t.asyncQueue.enqueueRetryable((async () => {
-        O("RemoteStore", "Retrying IndexedDB access"), await n(), t.fu.delete(1 /* IndexedDbFailed */), 
-        await eu(t);
+        M("RemoteStore", "Retrying IndexedDB access"), await n(), t.Ko.delete(1 /* IndexedDbFailed */), 
+        await Fo(t);
     }));
 }
 
 /**
  * Executes `op`. If `op` fails, takes the network offline until `op`
  * succeeds. Returns after the first attempt.
- */ function wu(t, e) {
-    return e().catch((n => _u(t, n, e)));
+ */ function Xo(t, e) {
+    return e().catch((n => Yo(t, n, e)));
 }
 
-async function mu(t) {
-    const e = K(t), n = vu(e);
-    let s = e.hu.length > 0 ? e.hu[e.hu.length - 1].batchId : -1;
-    for (;gu(e); ) try {
-        const t = await co(e.localStore, s);
+async function Zo(t) {
+    const e = K(t), n = lc(e);
+    let s = e.Uo.length > 0 ? e.Uo[e.Uo.length - 1].batchId : -1;
+    for (;tc(e); ) try {
+        const t = await Qr(e.localStore, s);
         if (null === t) {
-            0 === e.hu.length && n.Mo();
+            0 === e.Uo.length && n.ho();
             break;
         }
-        s = t.batchId, yu(e, t);
+        s = t.batchId, ec(e, t);
     } catch (t) {
-        await _u(e, t);
+        await Yo(e, t);
     }
-    pu(e) && Iu(e);
+    nc(e) && sc(e);
 }
 
 /**
  * Returns true if we can add to the write pipeline (i.e. the network is
  * enabled and the write pipeline is not full).
- */ function gu(t) {
-    return cu(t) && t.hu.length < 10;
+ */ function tc(t) {
+    return Qo(t) && t.Uo.length < 10;
 }
 
 /**
  * Queues additional writes to be sent to the write stream, sending them
  * immediately if the write stream is established.
- */ function yu(t, e) {
-    t.hu.push(e);
-    const n = vu(t);
-    n.xo() && n.Ho && n.Jo(e.mutations);
+ */ function ec(t, e) {
+    t.Uo.push(e);
+    const n = lc(t);
+    n.co() && n.bo && n.vo(e.mutations);
 }
 
-function pu(t) {
-    return cu(t) && !vu(t).Co() && t.hu.length > 0;
+function nc(t) {
+    return Qo(t) && !lc(t).oo() && t.Uo.length > 0;
 }
 
-function Iu(t) {
-    vu(t).start();
+function sc(t) {
+    lc(t).start();
 }
 
-async function Tu(t) {
-    vu(t).Zo();
+async function ic(t) {
+    lc(t).Do();
 }
 
-async function Eu(t) {
-    const e = vu(t);
+async function rc(t) {
+    const e = lc(t);
     // Send the write pipeline now that the stream is established.
-        for (const n of t.hu) e.Jo(n.mutations);
+        for (const n of t.Uo) e.vo(n.mutations);
 }
 
-async function Au(t, e, n) {
-    const s = t.hu.shift(), i = xi.from(s, e, n);
-    await wu(t, (() => t.remoteSyncer.applySuccessfulWrite(i))), 
+async function oc(t, e, n) {
+    const s = t.Uo.shift(), i = mi.from(s, e, n);
+    await Xo(t, (() => t.remoteSyncer.applySuccessfulWrite(i))), 
     // It's possible that with the completion of this mutation another
     // slot has freed up.
-    await mu(t);
+    await Zo(t);
 }
 
-async function Ru(t, e) {
+async function cc(t, e) {
     // If the write stream closed after the write handshake completes, a write
     // operation failed and we fail the pending operation.
-    e && vu(t).Ho && 
+    e && lc(t).bo && 
     // This error affects the actual write.
     await async function(t, e) {
         // Only handle permanent errors here. If it's transient, just let the retry
         // logic kick in.
-        if (n = e.code, On(n) && n !== G.ABORTED) {
+        if (n = e.code, En(n) && n !== G.ABORTED) {
             // This was a permanent error, the request itself was the problem
             // so it's not going to succeed if we resend it.
-            const n = t.hu.shift();
+            const n = t.Uo.shift();
             // In this case it's also unlikely that the server itself is melting
             // down -- this was just a bad request so inhibit backoff on the next
             // restart.
-                        vu(t).ko(), await wu(t, (() => t.remoteSyncer.rejectFailedWrite(n.batchId, e))), 
+                        lc(t).ao(), await Xo(t, (() => t.remoteSyncer.rejectFailedWrite(n.batchId, e))), 
             // It's possible that with the completion of this mutation
             // another slot has freed up.
-            await mu(t);
+            await Zo(t);
         }
         var n;
     }(t, e), 
     // The write stream might have been started by refilling the write
     // pipeline for failed writes
-    pu(t) && Iu(t);
+    nc(t) && sc(t);
 }
 
-async function Pu(t, e) {
+async function uc(t, e) {
     const n = K(t);
-    n.asyncQueue.verifyOperationInProgress(), O("RemoteStore", "RemoteStore received new credentials");
-    const s = cu(n);
+    n.asyncQueue.verifyOperationInProgress(), M("RemoteStore", "RemoteStore received new credentials");
+    const s = Qo(n);
     // Tear down and re-create our network streams. This will ensure we get a
     // fresh auth token for the new user and re-fill the write pipeline with
     // new mutations from the LocalStore (since mutations are per-user).
-        n.fu.add(3 /* CredentialChange */), await nu(n), s && 
+        n.Ko.add(3 /* CredentialChange */), await Bo(n), s && 
     // Don't set the network status to Unknown if we are offline.
-    n.wu.set("Unknown" /* Unknown */), await n.remoteSyncer.handleCredentialChange(e), 
-    n.fu.delete(3 /* CredentialChange */), await eu(n);
+    n.Qo.set("Unknown" /* Unknown */), await n.remoteSyncer.handleCredentialChange(e), 
+    n.Ko.delete(3 /* CredentialChange */), await Fo(n);
 }
 
 /**
  * Toggles the network state when the client gains or loses its primary lease.
- */ async function bu(t, e) {
+ */ async function ac(t, e) {
     const n = K(t);
-    e ? (n.fu.delete(2 /* IsSecondary */), await eu(n)) : e || (n.fu.add(2 /* IsSecondary */), 
-    await nu(n), n.wu.set("Unknown" /* Unknown */));
+    e ? (n.Ko.delete(2 /* IsSecondary */), await Fo(n)) : e || (n.Ko.add(2 /* IsSecondary */), 
+    await Bo(n), n.Qo.set("Unknown" /* Unknown */));
 }
 
 /**
@@ -16537,12 +16144,12 @@ async function Pu(t, e) {
  *
  * PORTING NOTE: On iOS and Android, the WatchStream gets registered on startup.
  * This is not done on Web to allow it to be tree-shaken.
- */ function Vu(t) {
-    return t.gu || (
+ */ function hc(t) {
+    return t.zo || (
     // Create stream (but note that it is not started yet).
-    t.gu = function(t, e, n) {
+    t.zo = function(t, e, n) {
         const s = K(t);
-        return s.eu(), new Jo(e, s.bo, s.authCredentials, s.appCheckCredentials, s.M, n);
+        return s.No(), new xo(e, s.eo, s.authCredentials, s.appCheckCredentials, s.O, n);
     }
     /**
  * @license
@@ -16560,13 +16167,13 @@ async function Pu(t, e) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */ (t.datastore, t.asyncQueue, {
-        Hr: lu.bind(null, t),
-        Yr: fu.bind(null, t),
-        Qo: du.bind(null, t)
-    }), t.du.push((async e => {
-        e ? (t.gu.ko(), au(t) ? uu(t) : t.wu.set("Unknown" /* Unknown */)) : (await t.gu.stop(), 
-        hu(t));
-    }))), t.gu;
+        Pr: zo.bind(null, t),
+        vr: Ho.bind(null, t),
+        To: Jo.bind(null, t)
+    }), t.Go.push((async e => {
+        e ? (t.zo.ao(), jo(t) ? Go(t) : t.Qo.set("Unknown" /* Unknown */)) : (await t.zo.stop(), 
+        Wo(t));
+    }))), t.zo;
 }
 
 /**
@@ -16576,23 +16183,23 @@ async function Pu(t, e) {
  *
  * PORTING NOTE: On iOS and Android, the WriteStream gets registered on startup.
  * This is not done on Web to allow it to be tree-shaken.
- */ function vu(t) {
-    return t.yu || (
+ */ function lc(t) {
+    return t.Ho || (
     // Create stream (but note that it is not started yet).
-    t.yu = function(t, e, n) {
+    t.Ho = function(t, e, n) {
         const s = K(t);
-        return s.eu(), new Yo(e, s.bo, s.authCredentials, s.appCheckCredentials, s.M, n);
+        return s.No(), new ko(e, s.eo, s.authCredentials, s.appCheckCredentials, s.O, n);
     }(t.datastore, t.asyncQueue, {
-        Hr: Tu.bind(null, t),
-        Yr: Ru.bind(null, t),
-        Xo: Eu.bind(null, t),
-        Yo: Au.bind(null, t)
-    }), t.du.push((async e => {
-        e ? (t.yu.ko(), 
+        Pr: ic.bind(null, t),
+        vr: cc.bind(null, t),
+        So: rc.bind(null, t),
+        Vo: oc.bind(null, t)
+    }), t.Go.push((async e => {
+        e ? (t.Ho.ao(), 
         // This will start the write stream if necessary.
-        await mu(t)) : (await t.yu.stop(), t.hu.length > 0 && (O("RemoteStore", `Stopping write stream with ${t.hu.length} pending writes`), 
-        t.hu = []));
-    }))), t.yu;
+        await Zo(t)) : (await t.Ho.stop(), t.Uo.length > 0 && (M("RemoteStore", `Stopping write stream with ${t.Uo.length} pending writes`), 
+        t.Uo = []));
+    }))), t.Ho;
 }
 
 /**
@@ -16622,10 +16229,10 @@ async function Pu(t, e) {
  * in newer versions of TypeScript defines `finally`, which is not available in
  * IE.
  */
-class Su {
+class fc {
     constructor(t, e, n, s, i) {
         this.asyncQueue = t, this.timerId = e, this.targetTimeMs = n, this.op = s, this.removalCallback = i, 
-        this.deferred = new j, this.then = this.deferred.promise.then.bind(this.deferred.promise), 
+        this.deferred = new Q, this.then = this.deferred.promise.then.bind(this.deferred.promise), 
         // It's normal for the deferred promise to be canceled (due to cancellation)
         // and so we attach a dummy catch callback to avoid
         // 'UnhandledPromiseRejectionWarning' log spam.
@@ -16645,7 +16252,7 @@ class Su {
      *   PORTING NOTE: This exists to prevent making removeDelayedOperation() and
      *   the DelayedOperation class public.
      */    static createAndSchedule(t, e, n, s, i) {
-        const r = Date.now() + n, o = new Su(t, e, r, s, i);
+        const r = Date.now() + n, o = new fc(t, e, r, s, i);
         return o.start(n), o;
     }
     /**
@@ -16667,7 +16274,7 @@ class Su {
      * As long as the operation has not yet been run, calling cancel() provides a
      * guarantee that the operation will not be run.
      */    cancel(t) {
-        null !== this.timerHandle && (this.clearTimeout(), this.deferred.reject(new Q(G.CANCELLED, "Operation cancelled" + (t ? ": " + t : ""))));
+        null !== this.timerHandle && (this.clearTimeout(), this.deferred.reject(new j(G.CANCELLED, "Operation cancelled" + (t ? ": " + t : ""))));
     }
     handleDelayElapsed() {
         this.asyncQueue.enqueueAndForget((() => null !== this.timerHandle ? (this.clearTimeout(), 
@@ -16682,8 +16289,8 @@ class Su {
 /**
  * Returns a FirestoreError that can be surfaced to the user if the provided
  * error is an IndexedDbTransactionError. Re-throws the error otherwise.
- */ function Du(t, e) {
-    if (F("AsyncQueue", `${e}: ${t}`), Ri(t)) return new Q(G.UNAVAILABLE, `${e}: ${t}`);
+ */ function dc(t, e) {
+    if ($("AsyncQueue", `${e}: ${t}`), ui(t)) return new j(G.UNAVAILABLE, `${e}: ${t}`);
     throw t;
 }
 
@@ -16708,19 +16315,19 @@ class Su {
  * in order specified by the provided comparator. We always add a document key
  * comparator on top of what is provided to guarantee document equality based on
  * the key.
- */ class Cu {
+ */ class _c {
     /** The default ordering is by key if the comparator is omitted */
     constructor(t) {
         // We are adding document key comparator to the end as it's the only
         // guaranteed unique property of a document.
-        this.comparator = t ? (e, n) => t(e, n) || xt.comparator(e.key, n.key) : (t, e) => xt.comparator(t.key, e.key), 
-        this.keyedMap = zn(), this.sortedSet = new Bn(this.comparator);
+        this.comparator = t ? (e, n) => t(e, n) || Nt.comparator(e.key, n.key) : (t, e) => Nt.comparator(t.key, e.key), 
+        this.keyedMap = Nn(), this.sortedSet = new An(this.comparator);
     }
     /**
      * Returns an empty copy of the existing DocumentSet, using the same
      * comparator.
      */    static emptySet(t) {
-        return new Cu(t.comparator);
+        return new _c(t.comparator);
     }
     has(t) {
         return null != this.keyedMap.get(t);
@@ -16760,7 +16367,7 @@ class Su {
         return e ? this.copy(this.keyedMap.remove(t), this.sortedSet.remove(e)) : this;
     }
     isEqual(t) {
-        if (!(t instanceof Cu)) return !1;
+        if (!(t instanceof _c)) return !1;
         if (this.size !== t.size) return !1;
         const e = this.sortedSet.getIterator(), n = t.sortedSet.getIterator();
         for (;e.hasNext(); ) {
@@ -16776,7 +16383,7 @@ class Su {
         })), 0 === t.length ? "DocumentSet ()" : "DocumentSet (\n  " + t.join("  \n") + "\n)";
     }
     copy(t, e) {
-        const n = new Cu;
+        const n = new _c;
         return n.comparator = this.comparator, n.keyedMap = t, n.sortedSet = e, n;
     }
 }
@@ -16800,27 +16407,27 @@ class Su {
 /**
  * DocumentChangeSet keeps track of a set of changes to docs in a query, merging
  * duplicate events for the same doc.
- */ class xu {
+ */ class wc {
     constructor() {
-        this.pu = new Bn(xt.comparator);
+        this.Jo = new An(Nt.comparator);
     }
     track(t) {
-        const e = t.doc.key, n = this.pu.get(e);
+        const e = t.doc.key, n = this.Jo.get(e);
         n ? 
         // Merge the new change with the existing change.
-        0 /* Added */ !== t.type && 3 /* Metadata */ === n.type ? this.pu = this.pu.insert(e, t) : 3 /* Metadata */ === t.type && 1 /* Removed */ !== n.type ? this.pu = this.pu.insert(e, {
+        0 /* Added */ !== t.type && 3 /* Metadata */ === n.type ? this.Jo = this.Jo.insert(e, t) : 3 /* Metadata */ === t.type && 1 /* Removed */ !== n.type ? this.Jo = this.Jo.insert(e, {
             type: n.type,
             doc: t.doc
-        }) : 2 /* Modified */ === t.type && 2 /* Modified */ === n.type ? this.pu = this.pu.insert(e, {
+        }) : 2 /* Modified */ === t.type && 2 /* Modified */ === n.type ? this.Jo = this.Jo.insert(e, {
             type: 2 /* Modified */ ,
             doc: t.doc
-        }) : 2 /* Modified */ === t.type && 0 /* Added */ === n.type ? this.pu = this.pu.insert(e, {
+        }) : 2 /* Modified */ === t.type && 0 /* Added */ === n.type ? this.Jo = this.Jo.insert(e, {
             type: 0 /* Added */ ,
             doc: t.doc
-        }) : 1 /* Removed */ === t.type && 0 /* Added */ === n.type ? this.pu = this.pu.remove(e) : 1 /* Removed */ === t.type && 2 /* Modified */ === n.type ? this.pu = this.pu.insert(e, {
+        }) : 1 /* Removed */ === t.type && 0 /* Added */ === n.type ? this.Jo = this.Jo.remove(e) : 1 /* Removed */ === t.type && 2 /* Modified */ === n.type ? this.Jo = this.Jo.insert(e, {
             type: 1 /* Removed */ ,
             doc: n.doc
-        }) : 0 /* Added */ === t.type && 1 /* Removed */ === n.type ? this.pu = this.pu.insert(e, {
+        }) : 0 /* Added */ === t.type && 1 /* Removed */ === n.type ? this.Jo = this.Jo.insert(e, {
             type: 2 /* Modified */ ,
             doc: t.doc
         }) : 
@@ -16831,20 +16438,20 @@ class Su {
         // Removed->Modified
         // Metadata->Added
         // Removed->Metadata
-        L() : this.pu = this.pu.insert(e, t);
+        L() : this.Jo = this.Jo.insert(e, t);
     }
-    Iu() {
+    Yo() {
         const t = [];
-        return this.pu.inorderTraversal(((e, n) => {
+        return this.Jo.inorderTraversal(((e, n) => {
             t.push(n);
         })), t;
     }
 }
 
-class Nu {
-    constructor(t, e, n, s, i, r, o, u) {
+class mc {
+    constructor(t, e, n, s, i, r, o, c) {
         this.query = t, this.docs = e, this.oldDocs = n, this.docChanges = s, this.mutatedKeys = i, 
-        this.fromCache = r, this.syncStateChanged = o, this.excludesMetadataChanges = u;
+        this.fromCache = r, this.syncStateChanged = o, this.excludesMetadataChanges = c;
     }
     /** Returns a view snapshot as if all documents in the snapshot were added. */    static fromInitialDocuments(t, e, n, s) {
         const i = [];
@@ -16853,7 +16460,7 @@ class Nu {
                 type: 0 /* Added */ ,
                 doc: t
             });
-        })), new Nu(t, e, Cu.emptySet(e), i, n, s, 
+        })), new mc(t, e, _c.emptySet(e), i, n, s, 
         /* syncStateChanged= */ !0, 
         /* excludesMetadataChanges= */ !1);
     }
@@ -16861,7 +16468,7 @@ class Nu {
         return !this.mutatedKeys.isEmpty();
     }
     isEqual(t) {
-        if (!(this.fromCache === t.fromCache && this.syncStateChanged === t.syncStateChanged && this.mutatedKeys.isEqual(t.mutatedKeys) && je(this.query, t.query) && this.docs.isEqual(t.docs) && this.oldDocs.isEqual(t.oldDocs))) return !1;
+        if (!(this.fromCache === t.fromCache && this.syncStateChanged === t.syncStateChanged && this.mutatedKeys.isEqual(t.mutatedKeys) && Ne(this.query, t.query) && this.docs.isEqual(t.docs) && this.oldDocs.isEqual(t.oldDocs))) return !1;
         const e = this.docChanges, n = t.docChanges;
         if (e.length !== n.length) return !1;
         for (let t = 0; t < e.length; t++) if (e[t].type !== n[t].type || !e[t].doc.isEqual(n[t].doc)) return !1;
@@ -16888,36 +16495,36 @@ class Nu {
 /**
  * Holds the listeners and the last received ViewSnapshot for a query being
  * tracked by EventManager.
- */ class ku {
+ */ class gc {
     constructor() {
-        this.Tu = void 0, this.listeners = [];
+        this.Xo = void 0, this.listeners = [];
     }
 }
 
-class Mu {
+class yc {
     constructor() {
-        this.queries = new $n((t => We(t)), je), this.onlineState = "Unknown" /* Unknown */ , 
-        this.Eu = new Set;
+        this.queries = new Er((t => xe(t)), Ne), this.onlineState = "Unknown" /* Unknown */ , 
+        this.Zo = new Set;
     }
 }
 
-async function Ou(t, e) {
+async function pc(t, e) {
     const n = K(t), s = e.query;
     let i = !1, r = n.queries.get(s);
-    if (r || (i = !0, r = new ku), i) try {
-        r.Tu = await n.onListen(s);
+    if (r || (i = !0, r = new gc), i) try {
+        r.Xo = await n.onListen(s);
     } catch (t) {
-        const n = Du(t, `Initialization of query '${ze(e.query)}' failed`);
+        const n = dc(t, `Initialization of query '${ke(e.query)}' failed`);
         return void e.onError(n);
     }
     if (n.queries.set(s, r), r.listeners.push(e), 
     // Run global snapshot listeners if a consistent snapshot has been emitted.
-    e.Au(n.onlineState), r.Tu) {
-        e.Ru(r.Tu) && Lu(n);
+    e.tc(n.onlineState), r.Xo) {
+        e.ec(r.Xo) && Ac(n);
     }
 }
 
-async function Fu(t, e) {
+async function Ic(t, e) {
     const n = K(t), s = e.query;
     let i = !1;
     const r = n.queries.get(s);
@@ -16928,20 +16535,20 @@ async function Fu(t, e) {
     if (i) return n.queries.delete(s), n.onUnlisten(s);
 }
 
-function $u(t, e) {
+function Ec(t, e) {
     const n = K(t);
     let s = !1;
     for (const t of e) {
         const e = t.query, i = n.queries.get(e);
         if (i) {
-            for (const e of i.listeners) e.Ru(t) && (s = !0);
-            i.Tu = t;
+            for (const e of i.listeners) e.ec(t) && (s = !0);
+            i.Xo = t;
         }
     }
-    s && Lu(n);
+    s && Ac(n);
 }
 
-function Bu(t, e, n) {
+function Tc(t, e, n) {
     const s = K(t), i = s.queries.get(e);
     if (i) for (const t of i.listeners) t.onError(n);
     // Remove all listeners. NOTE: We don't need to call syncEngine.unlisten()
@@ -16950,8 +16557,8 @@ function Bu(t, e, n) {
 }
 
 // Call all global snapshot listeners that have been set.
-function Lu(t) {
-    t.Eu.forEach((t => {
+function Ac(t) {
+    t.Zo.forEach((t => {
         t.next();
     }));
 }
@@ -16961,42 +16568,42 @@ function Lu(t) {
  * when to raise the event.
  *
  * It uses an Observer to dispatch events.
- */ class Uu {
+ */ class Rc {
     constructor(t, e, n) {
-        this.query = t, this.Pu = e, 
+        this.query = t, this.nc = e, 
         /**
          * Initial snapshots (e.g. from cache) may not be propagated to the wrapped
          * observer. This flag is set to true once we've actually raised an event.
          */
-        this.bu = !1, this.Vu = null, this.onlineState = "Unknown" /* Unknown */ , this.options = n || {};
+        this.sc = !1, this.ic = null, this.onlineState = "Unknown" /* Unknown */ , this.options = n || {};
     }
     /**
      * Applies the new ViewSnapshot to this listener, raising a user-facing event
      * if applicable (depending on what changed, whether the user has opted into
      * metadata-only changes, etc.). Returns true if a user-facing event was
      * indeed raised.
-     */    Ru(t) {
+     */    ec(t) {
         if (!this.options.includeMetadataChanges) {
             // Remove the metadata only changes.
             const e = [];
             for (const n of t.docChanges) 3 /* Metadata */ !== n.type && e.push(n);
-            t = new Nu(t.query, t.docs, t.oldDocs, e, t.mutatedKeys, t.fromCache, t.syncStateChanged, 
+            t = new mc(t.query, t.docs, t.oldDocs, e, t.mutatedKeys, t.fromCache, t.syncStateChanged, 
             /* excludesMetadataChanges= */ !0);
         }
         let e = !1;
-        return this.bu ? this.vu(t) && (this.Pu.next(t), e = !0) : this.Su(t, this.onlineState) && (this.Du(t), 
-        e = !0), this.Vu = t, e;
+        return this.sc ? this.rc(t) && (this.nc.next(t), e = !0) : this.oc(t, this.onlineState) && (this.cc(t), 
+        e = !0), this.ic = t, e;
     }
     onError(t) {
-        this.Pu.error(t);
+        this.nc.error(t);
     }
-    /** Returns whether a snapshot was raised. */    Au(t) {
+    /** Returns whether a snapshot was raised. */    tc(t) {
         this.onlineState = t;
         let e = !1;
-        return this.Vu && !this.bu && this.Su(this.Vu, t) && (this.Du(this.Vu), e = !0), 
+        return this.ic && !this.sc && this.oc(this.ic, t) && (this.cc(this.ic), e = !0), 
         e;
     }
-    Su(t, e) {
+    oc(t, e) {
         // Always raise the first event when we're synced
         if (!t.fromCache) return !0;
         // NOTE: We consider OnlineState.Unknown as online (it should become Offline
@@ -17004,24 +16611,24 @@ function Lu(t) {
                 const n = "Offline" /* Offline */ !== e;
         // Don't raise the event if we're online, aren't synced yet (checked
         // above) and are waiting for a sync.
-                return (!this.options.Cu || !n) && (!t.docs.isEmpty() || "Offline" /* Offline */ === e);
+                return (!this.options.uc || !n) && (!t.docs.isEmpty() || "Offline" /* Offline */ === e);
         // Raise data from cache if we have any documents or we are offline
         }
-    vu(t) {
+    rc(t) {
         // We don't need to handle includeDocumentMetadataChanges here because
         // the Metadata only changes have already been stripped out if needed.
         // At this point the only changes we will see are the ones we should
         // propagate.
         if (t.docChanges.length > 0) return !0;
-        const e = this.Vu && this.Vu.hasPendingWrites !== t.hasPendingWrites;
+        const e = this.ic && this.ic.hasPendingWrites !== t.hasPendingWrites;
         return !(!t.syncStateChanged && !e) && !0 === this.options.includeMetadataChanges;
         // Generally we should have hit one of the cases above, but it's possible
         // to get here if there were only metadata docChanges and they got
         // stripped out.
         }
-    Du(t) {
-        t = Nu.fromInitialDocuments(t.query, t.docs, t.mutatedKeys, t.fromCache), this.bu = !0, 
-        this.Pu.next(t);
+    cc(t) {
+        t = mc.fromInitialDocuments(t.query, t.docs, t.mutatedKeys, t.fromCache), this.sc = !0, 
+        this.nc.next(t);
     }
 }
 
@@ -17044,13 +16651,13 @@ function Lu(t) {
 /**
  * A complete element in the bundle stream, together with the byte length it
  * occupies in the stream.
- */ class qu {
+ */ class Pc {
     constructor(t, 
     // How many bytes this element takes to store in the bundle.
     e) {
         this.payload = t, this.byteLength = e;
     }
-    xu() {
+    ac() {
         return "metadata" in this.payload;
     }
 }
@@ -17073,61 +16680,54 @@ function Lu(t) {
  */
 /**
  * Helper to convert objects from bundles to model objects in the SDK.
- */ class Ku {
+ */ class bc {
     constructor(t) {
-        this.M = t;
+        this.O = t;
     }
-    fi(t) {
-        return Is(this.M, t);
+    Gs(t) {
+        return ss(this.O, t);
     }
     /**
      * Converts a BundleDocument to a MutableDocument.
-     */    di(t) {
-        return t.metadata.exists ? bs(this.M, t.document, !1) : ne.newNoDocument(this.fi(t.metadata.name), this._i(t.metadata.readTime));
+     */    js(t) {
+        return t.metadata.exists ? as(this.O, t.document, !1) : Jt.newNoDocument(this.Gs(t.metadata.name), this.Qs(t.metadata.readTime));
     }
-    _i(t) {
-        return ms(t);
+    Qs(t) {
+        return Zn(t);
     }
 }
 
 /**
  * A class to process the elements from a bundle, load them into local
  * storage and provide progress update while loading.
- */ class Gu {
+ */ class vc {
     constructor(t, e, n) {
-        this.Nu = t, this.localStore = e, this.M = n, 
+        this.hc = t, this.localStore = e, this.O = n, 
         /** Batched queries to be saved into storage */
         this.queries = [], 
         /** Batched documents to be saved into storage */
-        this.documents = [], 
-        /** The collection groups affected by this bundle. */
-        this.collectionGroups = new Set, this.progress = Qu(t);
+        this.documents = [], this.progress = Vc(t);
     }
     /**
      * Adds an element from the bundle to the loader.
      *
      * Returns a new progress if adding the element leads to a new progress,
      * otherwise returns null.
-     */    ku(t) {
+     */    lc(t) {
         this.progress.bytesLoaded += t.byteLength;
         let e = this.progress.documentsLoaded;
-        if (t.payload.namedQuery) this.queries.push(t.payload.namedQuery); else if (t.payload.documentMetadata) {
-            this.documents.push({
-                metadata: t.payload.documentMetadata
-            }), t.payload.documentMetadata.exists || ++e;
-            const n = _t.fromString(t.payload.documentMetadata.name);
-            this.collectionGroups.add(n.get(n.length - 2));
-        } else t.payload.document && (this.documents[this.documents.length - 1].document = t.payload.document, 
-        ++e);
-        return e !== this.progress.documentsLoaded ? (this.progress.documentsLoaded = e, 
+        return t.payload.namedQuery ? this.queries.push(t.payload.namedQuery) : t.payload.documentMetadata ? (this.documents.push({
+            metadata: t.payload.documentMetadata
+        }), t.payload.documentMetadata.exists || ++e) : t.payload.document && (this.documents[this.documents.length - 1].document = t.payload.document, 
+        ++e), e !== this.progress.documentsLoaded ? (this.progress.documentsLoaded = e, 
         Object.assign({}, this.progress)) : null;
     }
-    Mu(t) {
-        const e = new Map, n = new Ku(this.M);
+    fc(t) {
+        const e = new Map, n = new bc(this.O);
         for (const s of t) if (s.metadata.queries) {
-            const t = n.fi(s.metadata.name);
+            const t = n.Gs(s.metadata.name);
             for (const n of s.metadata.queries) {
-                const s = (e.get(n) || Xn()).add(t);
+                const s = (e.get(n) || On()).add(t);
                 e.set(n, s);
             }
         }
@@ -17136,20 +16736,16 @@ function Lu(t) {
     /**
      * Update the progress to 'Success' and return the updated progress.
      */    async complete() {
-        const t = await go(this.localStore, new Ku(this.M), this.documents, this.Nu.id), e = this.Mu(this.documents);
-        for (const t of this.queries) await yo(this.localStore, t, e.get(t.name));
-        return this.progress.taskState = "Success", {
-            progress: this.progress,
-            Ou: this.collectionGroups,
-            Fu: t
-        };
+        const t = await Zr(this.localStore, new bc(this.O), this.documents, this.hc.id), e = this.fc(this.documents);
+        for (const t of this.queries) await to(this.localStore, t, e.get(t.name));
+        return this.progress.taskState = "Success", new Or(Object.assign({}, this.progress), t);
     }
 }
 
 /**
  * Returns a `LoadBundleTaskProgress` representing the initial progress of
  * loading a bundle.
- */ function Qu(t) {
+ */ function Vc(t) {
     return {
         taskState: "Running",
         documentsLoaded: 0,
@@ -17179,13 +16775,13 @@ function Lu(t) {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-class ju {
+class Sc {
     constructor(t) {
         this.key = t;
     }
 }
 
-class Wu {
+class Dc {
     constructor(t) {
         this.key = t;
     }
@@ -17195,11 +16791,11 @@ class Wu {
  * View is responsible for computing the final merged truth of what docs are in
  * a query. It gets notified of local and remote changes to docs, and applies
  * the query filters and limits to determine the most correct possible results.
- */ class zu {
+ */ class Cc {
     constructor(t, 
     /** Documents included in the remote target */
     e) {
-        this.query = t, this.$u = e, this.Bu = null, 
+        this.query = t, this.dc = e, this._c = null, 
         /**
          * A flag whether the view is current with the backend. A view is considered
          * current after it has seen the current flag from the backend and did not
@@ -17208,15 +16804,15 @@ class Wu {
          */
         this.current = !1, 
         /** Documents in the view but not in the remote target */
-        this.Lu = Xn(), 
+        this.wc = On(), 
         /** Document Keys that have local changes */
-        this.mutatedKeys = Xn(), this.Uu = Ye(t), this.qu = new Cu(this.Uu);
+        this.mutatedKeys = On(), this.mc = Me(t), this.gc = new _c(this.mc);
     }
     /**
      * The set of remote documents that the server has told us belongs to the target associated with
      * this view.
-     */    get Ku() {
-        return this.$u;
+     */    get yc() {
+        return this.dc;
     }
     /**
      * Iterates over a set of doc changes, applies the query limit, and computes
@@ -17227,8 +16823,8 @@ class Wu {
      * @param previousChanges - If this is being called with a refill, then start
      *        with this set of docs and changes instead of the current view.
      * @returns a new set of docs, changes, and refill flag.
-     */    Gu(t, e) {
-        const n = e ? e.Qu : new xu, s = e ? e.qu : this.qu;
+     */    Ic(t, e) {
+        const n = e ? e.Ec : new wc, s = e ? e.gc : this.gc;
         let i = e ? e.mutatedKeys : this.mutatedKeys, r = s, o = !1;
         // Track the last doc in a (full) limit. This is necessary, because some
         // update (a delete, or an update moving a doc past the old limit) might
@@ -17238,54 +16834,54 @@ class Wu {
         // deletes. So we keep this doc at the old limit to compare the updates to.
         // Note that this should never get used in a refill (when previousChanges is
         // set), because there will only be adds -- no deletes or updates.
-        const u = $e(this.query) && s.size === this.query.limit ? s.last() : null, a = Be(this.query) && s.size === this.query.limit ? s.first() : null;
+        const c = Re(this.query) && s.size === this.query.limit ? s.last() : null, u = Pe(this.query) && s.size === this.query.limit ? s.first() : null;
         // Drop documents out to meet limit/limitToLast requirement.
         if (t.inorderTraversal(((t, e) => {
-            const c = s.get(t), h = He(this.query, e) ? e : null, l = !!c && this.mutatedKeys.has(c.key), f = !!h && (h.hasLocalMutations || 
+            const a = s.get(t), h = Oe(this.query, e) ? e : null, l = !!a && this.mutatedKeys.has(a.key), f = !!h && (h.hasLocalMutations || 
             // We only consider committed mutations for documents that were
             // mutated during the lifetime of the view.
             this.mutatedKeys.has(h.key) && h.hasCommittedMutations);
             let d = !1;
             // Calculate change
-                        if (c && h) {
-                c.data.isEqual(h.data) ? l !== f && (n.track({
+                        if (a && h) {
+                a.data.isEqual(h.data) ? l !== f && (n.track({
                     type: 3 /* Metadata */ ,
                     doc: h
-                }), d = !0) : this.ju(c, h) || (n.track({
+                }), d = !0) : this.Tc(a, h) || (n.track({
                     type: 2 /* Modified */ ,
                     doc: h
-                }), d = !0, (u && this.Uu(h, u) > 0 || a && this.Uu(h, a) < 0) && (
+                }), d = !0, (c && this.mc(h, c) > 0 || u && this.mc(h, u) < 0) && (
                 // This doc moved from inside the limit to outside the limit.
                 // That means there may be some other doc in the local cache
                 // that should be included instead.
                 o = !0));
-            } else !c && h ? (n.track({
+            } else !a && h ? (n.track({
                 type: 0 /* Added */ ,
                 doc: h
-            }), d = !0) : c && !h && (n.track({
+            }), d = !0) : a && !h && (n.track({
                 type: 1 /* Removed */ ,
-                doc: c
-            }), d = !0, (u || a) && (
+                doc: a
+            }), d = !0, (c || u) && (
             // A doc was removed from a full limit query. We'll need to
             // requery from the local cache to see if we know about some other
             // doc that should be in the results.
             o = !0));
             d && (h ? (r = r.add(h), i = f ? i.add(t) : i.delete(t)) : (r = r.delete(t), i = i.delete(t)));
-        })), $e(this.query) || Be(this.query)) for (;r.size > this.query.limit; ) {
-            const t = $e(this.query) ? r.last() : r.first();
+        })), Re(this.query) || Pe(this.query)) for (;r.size > this.query.limit; ) {
+            const t = Re(this.query) ? r.last() : r.first();
             r = r.delete(t.key), i = i.delete(t.key), n.track({
                 type: 1 /* Removed */ ,
                 doc: t
             });
         }
         return {
-            qu: r,
-            Qu: n,
-            ni: o,
+            gc: r,
+            Ec: n,
+            ks: o,
             mutatedKeys: i
         };
     }
-    ju(t, e) {
+    Tc(t, e) {
         // We suppress the initial change event for documents that were modified as
         // part of a write acknowledgment (e.g. when the value of a server transform
         // is applied) as Watch will send us the same document again.
@@ -17307,10 +16903,10 @@ class Wu {
      */
     // PORTING NOTE: The iOS/Android clients always compute limbo document changes.
     applyChanges(t, e, n) {
-        const s = this.qu;
-        this.qu = t.qu, this.mutatedKeys = t.mutatedKeys;
+        const s = this.gc;
+        this.gc = t.gc, this.mutatedKeys = t.mutatedKeys;
         // Sort changes based on type and query comparator
-        const i = t.Qu.Iu();
+        const i = t.Ec.Yo();
         i.sort(((t, e) => function(t, e) {
             const n = t => {
                 switch (t) {
@@ -17348,69 +16944,69 @@ class Wu {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ (t.type, e.type) || this.Uu(t.doc, e.doc))), this.Wu(n);
-        const r = e ? this.zu() : [], o = 0 === this.Lu.size && this.current ? 1 /* Synced */ : 0 /* Local */ , u = o !== this.Bu;
-        if (this.Bu = o, 0 !== i.length || u) {
+ */ (t.type, e.type) || this.mc(t.doc, e.doc))), this.Ac(n);
+        const r = e ? this.Rc() : [], o = 0 === this.wc.size && this.current ? 1 /* Synced */ : 0 /* Local */ , c = o !== this._c;
+        if (this._c = o, 0 !== i.length || c) {
             return {
-                snapshot: new Nu(this.query, t.qu, s, i, t.mutatedKeys, 0 /* Local */ === o, u, 
+                snapshot: new mc(this.query, t.gc, s, i, t.mutatedKeys, 0 /* Local */ === o, c, 
                 /* excludesMetadataChanges= */ !1),
-                Hu: r
+                Pc: r
             };
         }
         // no changes
         return {
-            Hu: r
+            Pc: r
         };
     }
     /**
      * Applies an OnlineState change to the view, potentially generating a
      * ViewChange if the view's syncState changes as a result.
-     */    Au(t) {
+     */    tc(t) {
         return this.current && "Offline" /* Offline */ === t ? (
         // If we're offline, set `current` to false and then call applyChanges()
         // to refresh our syncState and generate a ViewChange as appropriate. We
         // are guaranteed to get a new TargetChange that sets `current` back to
         // true once the client is back online.
         this.current = !1, this.applyChanges({
-            qu: this.qu,
-            Qu: new xu,
+            gc: this.gc,
+            Ec: new wc,
             mutatedKeys: this.mutatedKeys,
-            ni: !1
+            ks: !1
         }, 
         /* updateLimboDocuments= */ !1)) : {
-            Hu: []
+            Pc: []
         };
     }
     /**
      * Returns whether the doc for the given key should be in limbo.
-     */    Ju(t) {
+     */    bc(t) {
         // If the remote end says it's part of this query, it's not in limbo.
-        return !this.$u.has(t) && (
+        return !this.dc.has(t) && (
         // The local store doesn't think it's a result, so it shouldn't be in limbo.
-        !!this.qu.has(t) && !this.qu.get(t).hasLocalMutations);
+        !!this.gc.has(t) && !this.gc.get(t).hasLocalMutations);
     }
     /**
      * Updates syncedDocuments, current, and limbo docs based on the given change.
      * Returns the list of changes to which docs are in limbo.
-     */    Wu(t) {
-        t && (t.addedDocuments.forEach((t => this.$u = this.$u.add(t))), t.modifiedDocuments.forEach((t => {})), 
-        t.removedDocuments.forEach((t => this.$u = this.$u.delete(t))), this.current = t.current);
+     */    Ac(t) {
+        t && (t.addedDocuments.forEach((t => this.dc = this.dc.add(t))), t.modifiedDocuments.forEach((t => {})), 
+        t.removedDocuments.forEach((t => this.dc = this.dc.delete(t))), this.current = t.current);
     }
-    zu() {
+    Rc() {
         // We can only determine limbo documents when we're in-sync with the server.
         if (!this.current) return [];
         // TODO(klimt): Do this incrementally so that it's not quadratic when
         // updating many documents.
-                const t = this.Lu;
-        this.Lu = Xn(), this.qu.forEach((t => {
-            this.Ju(t.key) && (this.Lu = this.Lu.add(t.key));
+                const t = this.wc;
+        this.wc = On(), this.gc.forEach((t => {
+            this.bc(t.key) && (this.wc = this.wc.add(t.key));
         }));
         // Diff the new limbo docs with the old limbo docs.
         const e = [];
         return t.forEach((t => {
-            this.Lu.has(t) || e.push(new Wu(t));
-        })), this.Lu.forEach((n => {
-            t.has(n) || e.push(new ju(n));
+            this.wc.has(t) || e.push(new Dc(t));
+        })), this.wc.forEach((n => {
+            t.has(n) || e.push(new Sc(n));
         })), e;
     }
     /**
@@ -17433,9 +17029,9 @@ class Wu {
      * @returns The ViewChange that resulted from this synchronization.
      */
     // PORTING NOTE: Multi-tab only.
-    Yu(t) {
-        this.$u = t.li, this.Lu = Xn();
-        const e = this.Gu(t.documents);
+    vc(t) {
+        this.dc = t.Ks, this.wc = On();
+        const e = this.Ic(t.documents);
         return this.applyChanges(e, /*updateLimboDocuments=*/ !0);
     }
     /**
@@ -17444,8 +17040,8 @@ class Wu {
      * `hasPendingWrites` status of the already established view.
      */
     // PORTING NOTE: Multi-tab only.
-    Xu() {
-        return Nu.fromInitialDocuments(this.query, this.qu, this.mutatedKeys, 0 /* Local */ === this.Bu);
+    Vc() {
+        return mc.fromInitialDocuments(this.query, this.gc, this.mutatedKeys, 0 /* Local */ === this._c);
     }
 }
 
@@ -17453,7 +17049,7 @@ class Wu {
  * QueryView contains all of the data that SyncEngine needs to keep track of for
  * a particular query.
  */
-class Hu {
+class Nc {
     constructor(
     /**
      * The query itself.
@@ -17475,7 +17071,7 @@ class Hu {
     }
 }
 
-/** Tracks a limbo resolution. */ class Ju {
+/** Tracks a limbo resolution. */ class xc {
     constructor(t) {
         this.key = t, 
         /**
@@ -17484,7 +17080,7 @@ class Hu {
          * decide whether it needs to manufacture a delete event for the target once
          * the target is CURRENT.
          */
-        this.Zu = !1;
+        this.Sc = !1;
     }
 }
 
@@ -17500,13 +17096,13 @@ class Hu {
  * the class is not exported so they are only accessible from this module.
  * This is useful to implement optional features (like bundles) in free
  * functions, such that they are tree-shakeable.
- */ class Yu {
+ */ class kc {
     constructor(t, e, n, 
     // PORTING NOTE: Manages state synchronization in multi-tab environments.
     s, i, r) {
         this.localStore = t, this.remoteStore = e, this.eventManager = n, this.sharedClientState = s, 
-        this.currentUser = i, this.maxConcurrentLimboResolutions = r, this.ta = {}, this.ea = new $n((t => We(t)), je), 
-        this.na = new Map, 
+        this.currentUser = i, this.maxConcurrentLimboResolutions = r, this.Dc = {}, this.Cc = new Er((t => xe(t)), Ne), 
+        this.Nc = new Map, 
         /**
          * The keys of documents that are in limbo for which we haven't yet started a
          * limbo resolution query. The strings in this set are the result of calling
@@ -17516,28 +17112,28 @@ class Hu {
          * of arbitrary elements and it also maintains insertion order, providing the
          * desired queue-like FIFO semantics.
          */
-        this.sa = new Set, 
+        this.xc = new Set, 
         /**
          * Keeps track of the target ID for each document that is in limbo with an
          * active target.
          */
-        this.ia = new Bn(xt.comparator), 
+        this.kc = new An(Nt.comparator), 
         /**
          * Keeps track of the information about an active limbo resolution for each
          * active target ID that was started for the purpose of limbo resolution.
          */
-        this.ra = new Map, this.oa = new To, 
+        this.Oc = new Map, this.Mc = new so, 
         /** Stores user completion handlers, indexed by User and BatchId. */
-        this.ua = {}, 
+        this.$c = {}, 
         /** Stores user callbacks waiting for all pending writes to be acknowledged. */
-        this.aa = new Map, this.ca = br.yn(), this.onlineState = "Unknown" /* Unknown */ , 
+        this.Fc = new Map, this.Bc = ar.Je(), this.onlineState = "Unknown" /* Unknown */ , 
         // The primary state is set to `true` or `false` immediately after Firestore
         // startup. In the interim, a client should only be considered primary if
         // `isPrimary` is true.
-        this.ha = void 0;
+        this.Lc = void 0;
     }
     get isPrimaryClient() {
-        return !0 === this.ha;
+        return !0 === this.Lc;
     }
 }
 
@@ -17546,10 +17142,10 @@ class Hu {
  * server. All the subsequent view snapshots or errors are sent to the
  * subscribed handlers. Returns the initial snapshot.
  */
-async function Xu(t, e) {
-    const n = Va(t);
+async function Oc(t, e) {
+    const n = hu(t);
     let s, i;
-    const r = n.ea.get(e);
+    const r = n.Cc.get(e);
     if (r) 
     // PORTING NOTE: With Multi-Tab Web, it is possible that a query view
     // already exists when EventManager calls us for the first time. This
@@ -17557,11 +17153,11 @@ async function Xu(t, e) {
     // behalf of another tab and the user of the primary also starts listening
     // to the query. EventManager will not have an assigned target ID in this
     // case and calls `listen` to obtain this ID.
-    s = r.targetId, n.sharedClientState.addLocalQueryTarget(s), i = r.view.Xu(); else {
-        const t = await ho(n.localStore, Ge(e));
-        n.isPrimaryClient && su(n.remoteStore, t);
+    s = r.targetId, n.sharedClientState.addLocalQueryTarget(s), i = r.view.Vc(); else {
+        const t = await Wr(n.localStore, De(e));
+        n.isPrimaryClient && Lo(n.remoteStore, t);
         const r = n.sharedClientState.addLocalQueryTarget(t.targetId);
-        s = t.targetId, i = await Zu(n, e, s, "current" === r);
+        s = t.targetId, i = await Mc(n, e, s, "current" === r);
     }
     return i;
 }
@@ -17569,44 +17165,44 @@ async function Xu(t, e) {
 /**
  * Registers a view for a previously unknown query and computes its initial
  * snapshot.
- */ async function Zu(t, e, n, s) {
+ */ async function Mc(t, e, n, s) {
     // PORTING NOTE: On Web only, we inject the code that registers new Limbo
     // targets based on view changes. This allows us to only depend on Limbo
     // changes when user code includes queries.
-    t.la = (e, n, s) => async function(t, e, n, s) {
-        let i = e.view.Gu(n);
-        i.ni && (
+    t.Uc = (e, n, s) => async function(t, e, n, s) {
+        let i = e.view.Ic(n);
+        i.ks && (
         // The query has a limit and some docs were removed, so we need
         // to re-run the query against the local store to make sure we
         // didn't lose any good docs that had been past the limit.
-        i = await fo(t.localStore, e.query, 
-        /* usePreviousResults= */ !1).then((({documents: t}) => e.view.Gu(t, i))));
+        i = await Hr(t.localStore, e.query, 
+        /* usePreviousResults= */ !1).then((({documents: t}) => e.view.Ic(t, i))));
         const r = s && s.targetChanges.get(e.targetId), o = e.view.applyChanges(i, 
         /* updateLimboDocuments= */ t.isPrimaryClient, r);
-        return fa(t, e.targetId, o.Hu), o.snapshot;
+        return Hc(t, e.targetId, o.Pc), o.snapshot;
     }(t, e, n, s);
-    const i = await fo(t.localStore, e, 
-    /* usePreviousResults= */ !0), r = new zu(e, i.li), o = r.Gu(i.documents), u = ns.createSynthesizedTargetChangeForCurrentChange(n, s && "Offline" /* Offline */ !== t.onlineState), a = r.applyChanges(o, 
-    /* updateLimboDocuments= */ t.isPrimaryClient, u);
-    fa(t, n, a.Hu);
-    const c = new Hu(e, n, r);
-    return t.ea.set(e, c), t.na.has(n) ? t.na.get(n).push(e) : t.na.set(n, [ e ]), a.snapshot;
+    const i = await Hr(t.localStore, e, 
+    /* usePreviousResults= */ !0), r = new Cc(e, i.Ks), o = r.Ic(i.documents), c = Bn.createSynthesizedTargetChangeForCurrentChange(n, s && "Offline" /* Offline */ !== t.onlineState), u = r.applyChanges(o, 
+    /* updateLimboDocuments= */ t.isPrimaryClient, c);
+    Hc(t, n, u.Pc);
+    const a = new Nc(e, n, r);
+    return t.Cc.set(e, a), t.Nc.has(n) ? t.Nc.get(n).push(e) : t.Nc.set(n, [ e ]), u.snapshot;
 }
 
-/** Stops listening to the query. */ async function ta(t, e) {
-    const n = K(t), s = n.ea.get(e), i = n.na.get(s.targetId);
-    if (i.length > 1) return n.na.set(s.targetId, i.filter((t => !je(t, e)))), void n.ea.delete(e);
+/** Stops listening to the query. */ async function $c(t, e) {
+    const n = K(t), s = n.Cc.get(e), i = n.Nc.get(s.targetId);
+    if (i.length > 1) return n.Nc.set(s.targetId, i.filter((t => !Ne(t, e)))), void n.Cc.delete(e);
     // No other queries are mapped to the target, clean up the query and the target.
         if (n.isPrimaryClient) {
         // We need to remove the local query target first to allow us to verify
         // whether any other client is still interested in this target.
         n.sharedClientState.removeLocalQueryTarget(s.targetId);
-        n.sharedClientState.isActiveQueryTarget(s.targetId) || await lo(n.localStore, s.targetId, 
+        n.sharedClientState.isActiveQueryTarget(s.targetId) || await zr(n.localStore, s.targetId, 
         /*keepPersistedTargetData=*/ !1).then((() => {
-            n.sharedClientState.clearQueryState(s.targetId), iu(n.remoteStore, s.targetId), 
-            ha(n, s.targetId);
-        })).catch(Cr);
-    } else ha(n, s.targetId), await lo(n.localStore, s.targetId, 
+            n.sharedClientState.clearQueryState(s.targetId), Uo(n.remoteStore, s.targetId), 
+            Wc(n, s.targetId);
+        })).catch(_r);
+    } else Wc(n, s.targetId), await zr(n.localStore, s.targetId, 
     /*keepPersistedTargetData=*/ !0);
 }
 
@@ -17619,13 +17215,13 @@ async function Xu(t, e) {
  * have completed, *not* when the write was acked by the backend. The
  * userCallback is resolved once the write was acked/rejected by the
  * backend (or failed locally for any other reason).
- */ async function ea(t, e, n) {
-    const s = va(t);
+ */ async function Fc(t, e, n) {
+    const s = lu(t);
     try {
         const t = await function(t, e) {
-            const n = K(t), s = at.now(), i = e.reduce(((t, e) => t.add(e.key)), Xn());
+            const n = K(t), s = ut.now(), i = e.reduce(((t, e) => t.add(e.key)), On());
             let r;
-            return n.persistence.runTransaction("Locally write mutations", "readwrite", (t => n.ci.Ks(t, i).next((i => {
+            return n.persistence.runTransaction("Locally write mutations", "readwrite", (t => n.Us.Es(t, i).next((i => {
                 r = i;
                 // For non-idempotent mutations (such as `FieldValue.increment()`),
                 // we record the base state in a separate patch mutation. This is
@@ -17634,32 +17230,32 @@ async function Xu(t, e) {
                 // transform.
                 const o = [];
                 for (const t of e) {
-                    const e = An(t, r.get(t.key));
+                    const e = un(t, r.get(t.key));
                     null != e && 
                     // NOTE: The base state should only be applied if there's some
                     // existing document to override, so use a Precondition of
                     // exists=true
-                    o.push(new Vn(t.key, e, ee(e.value.mapValue), yn.exists(!0)));
+                    o.push(new fn(t.key, e, Ht(e.value.mapValue), nn.exists(!0)));
                 }
-                return n.Bs.addMutationBatch(t, s, o, e);
+                return n.gs.addMutationBatch(t, s, o, e);
             })))).then((t => (t.applyToLocalDocumentSet(r), {
                 batchId: t.batchId,
                 changes: r
             })));
         }(s.localStore, e);
         s.sharedClientState.addPendingMutation(t.batchId), function(t, e, n) {
-            let s = t.ua[t.currentUser.toKey()];
-            s || (s = new Bn(rt));
-            s = s.insert(e, n), t.ua[t.currentUser.toKey()] = s;
+            let s = t.$c[t.currentUser.toKey()];
+            s || (s = new An(rt));
+            s = s.insert(e, n), t.$c[t.currentUser.toKey()] = s;
         }
         /**
  * Resolves or rejects the user callback for the given batch and then discards
  * it.
- */ (s, t.batchId, n), await wa(s, t.changes), await mu(s.remoteStore);
+ */ (s, t.batchId, n), await Xc(s, t.changes), await Zo(s.remoteStore);
     } catch (t) {
         // If we can't persist the mutation, we reject the user callback and
         // don't send the mutation. The user can then retry the write.
-        const e = Du(t, "Failed to persist write");
+        const e = dc(t, "Failed to persist write");
         n.reject(e);
     }
 }
@@ -17668,29 +17264,29 @@ async function Xu(t, e) {
  * Applies one remote event to the sync engine, notifying any views of the
  * changes, and releasing any pending mutation batches that would become
  * visible because of the snapshot version the remote event contains.
- */ async function na(t, e) {
+ */ async function Bc(t, e) {
     const n = K(t);
     try {
-        const t = await uo(n.localStore, e);
+        const t = await Gr(n.localStore, e);
         // Update `receivedDocument` as appropriate for any limbo targets.
                 e.targetChanges.forEach(((t, e) => {
-            const s = n.ra.get(e);
+            const s = n.Oc.get(e);
             s && (
             // Since this is a limbo resolution lookup, it's for a single document
             // and it could be added, modified, or removed, but not a combination.
             U(t.addedDocuments.size + t.modifiedDocuments.size + t.removedDocuments.size <= 1), 
-            t.addedDocuments.size > 0 ? s.Zu = !0 : t.modifiedDocuments.size > 0 ? U(s.Zu) : t.removedDocuments.size > 0 && (U(s.Zu), 
-            s.Zu = !1));
-        })), await wa(n, t, e);
+            t.addedDocuments.size > 0 ? s.Sc = !0 : t.modifiedDocuments.size > 0 ? U(s.Sc) : t.removedDocuments.size > 0 && (U(s.Sc), 
+            s.Sc = !1));
+        })), await Xc(n, t, e);
     } catch (t) {
-        await Cr(t);
+        await _r(t);
     }
 }
 
 /**
  * Applies an OnlineState change to the sync engine and notifies any views of
  * the change.
- */ function sa(t, e, n) {
+ */ function Lc(t, e, n) {
     const s = K(t);
     // If we are the secondary client, we explicitly ignore the remote store's
     // online state (the local client may go offline, even though the primary
@@ -17698,8 +17294,8 @@ async function Xu(t, e) {
     // SharedClientState.
         if (s.isPrimaryClient && 0 /* RemoteStore */ === n || !s.isPrimaryClient && 1 /* SharedClientState */ === n) {
         const t = [];
-        s.ea.forEach(((n, s) => {
-            const i = s.view.Au(e);
+        s.Cc.forEach(((n, s) => {
+            const i = s.view.tc(e);
             i.snapshot && t.push(i.snapshot);
         })), function(t, e) {
             const n = K(t);
@@ -17708,9 +17304,9 @@ async function Xu(t, e) {
             n.queries.forEach(((t, n) => {
                 for (const t of n.listeners) 
                 // Run global snapshot listeners if a consistent snapshot has been emitted.
-                t.Au(e) && (s = !0);
-            })), s && Lu(n);
-        }(s.eventManager, e), t.length && s.ta.Qo(t), s.onlineState = e, s.isPrimaryClient && s.sharedClientState.setOnlineState(e);
+                t.tc(e) && (s = !0);
+            })), s && Ac(n);
+        }(s.eventManager, e), t.length && s.Dc.To(t), s.onlineState = e, s.isPrimaryClient && s.sharedClientState.setOnlineState(e);
     }
 }
 
@@ -17724,11 +17320,11 @@ async function Xu(t, e) {
  * @param err - A description of the condition that has forced the rejection.
  * Nearly always this will be an indication that the user is no longer
  * authorized to see the data matching the target.
- */ async function ia(t, e, n) {
+ */ async function Uc(t, e, n) {
     const s = K(t);
     // PORTING NOTE: Multi-tab only.
         s.sharedClientState.updateQueryState(e, "rejected", n);
-    const i = s.ra.get(e), r = i && i.key;
+    const i = s.Oc.get(e), r = i && i.key;
     if (r) {
         // TODO(klimt): We really only should do the following on permission
         // denied errors, but we don't have the cause code here.
@@ -17736,48 +17332,48 @@ async function Xu(t, e) {
         // This is kind of a hack. Ideally, we would have a method in the local
         // store to purge a document. However, it would be tricky to keep all of
         // the local store's invariants with another method.
-        let t = new Bn(xt.comparator);
+        let t = new An(Nt.comparator);
         // TODO(b/217189216): This limbo document should ideally have a read time,
         // so that it is picked up by any read-time based scans. The backend,
         // however, does not send a read time for target removals.
-                t = t.insert(r, ne.newNoDocument(r, ct.min()));
-        const n = Xn().add(r), i = new es(ct.min(), 
+                t = t.insert(r, Jt.newNoDocument(r, at.min()));
+        const n = On().add(r), i = new Fn(at.min(), 
         /* targetChanges= */ new Map, 
-        /* targetMismatches= */ new qn(rt), t, n);
-        await na(s, i), 
+        /* targetMismatches= */ new bn(rt), t, n);
+        await Bc(s, i), 
         // Since this query failed, we won't want to manually unlisten to it.
         // We only remove it from bookkeeping after we successfully applied the
         // RemoteEvent. If `applyRemoteEvent()` throws, we want to re-listen to
         // this query when the RemoteStore restarts the Watch stream, which should
         // re-trigger the target failure.
-        s.ia = s.ia.remove(r), s.ra.delete(e), _a(s);
-    } else await lo(s.localStore, e, 
-    /* keepPersistedTargetData */ !1).then((() => ha(s, e, n))).catch(Cr);
+        s.kc = s.kc.remove(r), s.Oc.delete(e), Yc(s);
+    } else await zr(s.localStore, e, 
+    /* keepPersistedTargetData */ !1).then((() => Wc(s, e, n))).catch(_r);
 }
 
-async function ra(t, e) {
+async function qc(t, e) {
     const n = K(t), s = e.batch.batchId;
     try {
-        const t = await ro(n.localStore, e);
+        const t = await qr(n.localStore, e);
         // The local store may or may not be able to apply the write result and
         // raise events immediately (depending on whether the watcher is caught
         // up), so we raise user callbacks first so that they consistently happen
         // before listen events.
-                ca(n, s, /*error=*/ null), aa(n, s), n.sharedClientState.updateMutationState(s, "acknowledged"), 
-        await wa(n, t);
+                Qc(n, s, /*error=*/ null), jc(n, s), n.sharedClientState.updateMutationState(s, "acknowledged"), 
+        await Xc(n, t);
     } catch (t) {
-        await Cr(t);
+        await _r(t);
     }
 }
 
-async function oa(t, e, n) {
+async function Kc(t, e, n) {
     const s = K(t);
     try {
         const t = await function(t, e) {
             const n = K(t);
             return n.persistence.runTransaction("Reject batch", "readwrite-primary", (t => {
                 let s;
-                return n.Bs.lookupMutationBatch(t, e).next((e => (U(null !== e), s = e.keys(), n.Bs.removeMutationBatch(t, e)))).next((() => n.Bs.performConsistencyCheck(t))).next((() => n.ci.Ks(t, s)));
+                return n.gs.lookupMutationBatch(t, e).next((e => (U(null !== e), s = e.keys(), n.gs.removeMutationBatch(t, e)))).next((() => n.gs.performConsistencyCheck(t))).next((() => n.Us.Es(t, s)));
             }));
         }
         /**
@@ -17790,31 +17386,31 @@ async function oa(t, e, n) {
         // raise events immediately (depending on whether the watcher is caught up),
         // so we raise user callbacks first so that they consistently happen before
         // listen events.
-                ca(s, e, n), aa(s, e), s.sharedClientState.updateMutationState(e, "rejected", n), 
-        await wa(s, t);
+                Qc(s, e, n), jc(s, e), s.sharedClientState.updateMutationState(e, "rejected", n), 
+        await Xc(s, t);
     } catch (n) {
-        await Cr(n);
+        await _r(n);
     }
 }
 
 /**
  * Registers a user callback that resolves when all pending mutations at the moment of calling
  * are acknowledged .
- */ async function ua(t, e) {
+ */ async function Gc(t, e) {
     const n = K(t);
-    cu(n.remoteStore) || O("SyncEngine", "The network is disabled. The task returned by 'awaitPendingWrites()' will not complete until the network is enabled.");
+    Qo(n.remoteStore) || M("SyncEngine", "The network is disabled. The task returned by 'awaitPendingWrites()' will not complete until the network is enabled.");
     try {
         const t = await function(t) {
             const e = K(t);
-            return e.persistence.runTransaction("Get highest unacknowledged batch id", "readonly", (t => e.Bs.getHighestUnacknowledgedBatchId(t)));
+            return e.persistence.runTransaction("Get highest unacknowledged batch id", "readonly", (t => e.gs.getHighestUnacknowledgedBatchId(t)));
         }(n.localStore);
         if (-1 === t) 
         // Trigger the callback right away if there is no pending writes at the moment.
         return void e.resolve();
-        const s = n.aa.get(t) || [];
-        s.push(e), n.aa.set(t, s);
+        const s = n.Fc.get(t) || [];
+        s.push(e), n.Fc.set(t, s);
     } catch (t) {
-        const n = Du(t, "Initialization of waitForPendingWrites() operation failed");
+        const n = dc(t, "Initialization of waitForPendingWrites() operation failed");
         e.reject(n);
     }
 }
@@ -17822,56 +17418,56 @@ async function oa(t, e, n) {
 /**
  * Triggers the callbacks that are waiting for this batch id to get acknowledged by server,
  * if there are any.
- */ function aa(t, e) {
-    (t.aa.get(e) || []).forEach((t => {
+ */ function jc(t, e) {
+    (t.Fc.get(e) || []).forEach((t => {
         t.resolve();
-    })), t.aa.delete(e);
+    })), t.Fc.delete(e);
 }
 
-/** Reject all outstanding callbacks waiting for pending writes to complete. */ function ca(t, e, n) {
+/** Reject all outstanding callbacks waiting for pending writes to complete. */ function Qc(t, e, n) {
     const s = K(t);
-    let i = s.ua[s.currentUser.toKey()];
+    let i = s.$c[s.currentUser.toKey()];
     // NOTE: Mutations restored from persistence won't have callbacks, so it's
     // okay for there to be no callback for this ID.
         if (i) {
         const t = i.get(e);
-        t && (n ? t.reject(n) : t.resolve(), i = i.remove(e)), s.ua[s.currentUser.toKey()] = i;
+        t && (n ? t.reject(n) : t.resolve(), i = i.remove(e)), s.$c[s.currentUser.toKey()] = i;
     }
 }
 
-function ha(t, e, n = null) {
+function Wc(t, e, n = null) {
     t.sharedClientState.removeLocalQueryTarget(e);
-    for (const s of t.na.get(e)) t.ea.delete(s), n && t.ta.fa(s, n);
-    if (t.na.delete(e), t.isPrimaryClient) {
-        t.oa.Pi(e).forEach((e => {
-            t.oa.containsKey(e) || 
+    for (const s of t.Nc.get(e)) t.Cc.delete(s), n && t.Dc.qc(s, n);
+    if (t.Nc.delete(e), t.isPrimaryClient) {
+        t.Mc.si(e).forEach((e => {
+            t.Mc.containsKey(e) || 
             // We removed the last reference for this key
-            la(t, e);
+            zc(t, e);
         }));
     }
 }
 
-function la(t, e) {
-    t.sa.delete(e.path.canonicalString());
+function zc(t, e) {
+    t.xc.delete(e.path.canonicalString());
     // It's possible that the target already got removed because the query failed. In that case,
     // the key won't exist in `limboTargetsByKey`. Only do the cleanup if we still have the target.
-    const n = t.ia.get(e);
-    null !== n && (iu(t.remoteStore, n), t.ia = t.ia.remove(e), t.ra.delete(n), _a(t));
+    const n = t.kc.get(e);
+    null !== n && (Uo(t.remoteStore, n), t.kc = t.kc.remove(e), t.Oc.delete(n), Yc(t));
 }
 
-function fa(t, e, n) {
-    for (const s of n) if (s instanceof ju) t.oa.addReference(s.key, e), da(t, s); else if (s instanceof Wu) {
-        O("SyncEngine", "Document no longer in limbo: " + s.key), t.oa.removeReference(s.key, e);
-        t.oa.containsKey(s.key) || 
+function Hc(t, e, n) {
+    for (const s of n) if (s instanceof Sc) t.Mc.addReference(s.key, e), Jc(t, s); else if (s instanceof Dc) {
+        M("SyncEngine", "Document no longer in limbo: " + s.key), t.Mc.removeReference(s.key, e);
+        t.Mc.containsKey(s.key) || 
         // We removed the last reference for this key
-        la(t, s.key);
+        zc(t, s.key);
     } else L();
 }
 
-function da(t, e) {
+function Jc(t, e) {
     const n = e.key, s = n.path.canonicalString();
-    t.ia.get(n) || t.sa.has(s) || (O("SyncEngine", "New document in limbo: " + n), t.sa.add(s), 
-    _a(t));
+    t.kc.get(n) || t.xc.has(s) || (M("SyncEngine", "New document in limbo: " + n), t.xc.add(s), 
+    Yc(t));
 }
 
 /**
@@ -17881,78 +17477,78 @@ function da(t, e) {
  * Without bounding the number of concurrent resolutions, the server can fail
  * with "resource exhausted" errors which can lead to pathological client
  * behavior as seen in https://github.com/firebase/firebase-js-sdk/issues/2683.
- */ function _a(t) {
-    for (;t.sa.size > 0 && t.ia.size < t.maxConcurrentLimboResolutions; ) {
-        const e = t.sa.values().next().value;
-        t.sa.delete(e);
-        const n = new xt(_t.fromString(e)), s = t.ca.next();
-        t.ra.set(s, new Ju(n)), t.ia = t.ia.insert(n, s), su(t.remoteStore, new ki(Ge(Fe(n.path)), s, 2 /* LimboResolution */ , nt.A));
+ */ function Yc(t) {
+    for (;t.xc.size > 0 && t.kc.size < t.maxConcurrentLimboResolutions; ) {
+        const e = t.xc.values().next().value;
+        t.xc.delete(e);
+        const n = new Nt(_t.fromString(e)), s = t.Bc.next();
+        t.Oc.set(s, new xc(n)), t.kc = t.kc.insert(n, s), Lo(t.remoteStore, new yi(De(Ae(n.path)), s, 2 /* LimboResolution */ , nt.A));
     }
 }
 
-async function wa(t, e, n) {
+async function Xc(t, e, n) {
     const s = K(t), i = [], r = [], o = [];
-    s.ea.isEmpty() || (s.ea.forEach(((t, u) => {
-        o.push(s.la(u, e, n).then((t => {
+    s.Cc.isEmpty() || (s.Cc.forEach(((t, c) => {
+        o.push(s.Uc(c, e, n).then((t => {
             if (t) {
-                s.isPrimaryClient && s.sharedClientState.updateQueryState(u.targetId, t.fromCache ? "not-current" : "current"), 
+                s.isPrimaryClient && s.sharedClientState.updateQueryState(c.targetId, t.fromCache ? "not-current" : "current"), 
                 i.push(t);
-                const e = to.Ys(u.targetId, t);
+                const e = $r.Ss(c.targetId, t);
                 r.push(e);
             }
         })));
-    })), await Promise.all(o), s.ta.Qo(i), await async function(t, e) {
+    })), await Promise.all(o), s.Dc.To(i), await async function(t, e) {
         const n = K(t);
         try {
-            await n.persistence.runTransaction("notifyLocalViewChanges", "readwrite", (t => pi.forEach(e, (e => pi.forEach(e.Hs, (s => n.persistence.referenceDelegate.addReference(t, e.targetId, s))).next((() => pi.forEach(e.Js, (s => n.persistence.referenceDelegate.removeReference(t, e.targetId, s)))))))));
+            await n.persistence.runTransaction("notifyLocalViewChanges", "readwrite", (t => si.forEach(e, (e => si.forEach(e.vs, (s => n.persistence.referenceDelegate.addReference(t, e.targetId, s))).next((() => si.forEach(e.Vs, (s => n.persistence.referenceDelegate.removeReference(t, e.targetId, s)))))))));
         } catch (t) {
-            if (!Ri(t)) throw t;
+            if (!ui(t)) throw t;
             // If `notifyLocalViewChanges` fails, we did not advance the sequence
             // number for the documents that were included in this transaction.
             // This might trigger them to be deleted earlier than they otherwise
             // would have, but it should not invalidate the integrity of the data.
-            O("LocalStore", "Failed to update sequence numbers: " + t);
+            M("LocalStore", "Failed to update sequence numbers: " + t);
         }
         for (const t of e) {
             const e = t.targetId;
             if (!t.fromCache) {
-                const t = n.ii.get(e), s = t.snapshotVersion, i = t.withLastLimboFreeSnapshotVersion(s);
+                const t = n.Ms.get(e), s = t.snapshotVersion, i = t.withLastLimboFreeSnapshotVersion(s);
                 // Advance the last limbo free snapshot version
-                                n.ii = n.ii.insert(e, i);
+                                n.Ms = n.Ms.insert(e, i);
             }
         }
     }(s.localStore, r));
 }
 
-async function ma(t, e) {
+async function Zc(t, e) {
     const n = K(t);
     if (!n.currentUser.isEqual(e)) {
-        O("SyncEngine", "User change. New user:", e.toKey());
-        const t = await io(n.localStore, e);
+        M("SyncEngine", "User change. New user:", e.toKey());
+        const t = await Ur(n.localStore, e);
         n.currentUser = e, 
         // Fails tasks waiting for pending writes requested by previous user.
         function(t, e) {
-            t.aa.forEach((t => {
+            t.Fc.forEach((t => {
                 t.forEach((t => {
-                    t.reject(new Q(G.CANCELLED, e));
+                    t.reject(new j(G.CANCELLED, e));
                 }));
-            })), t.aa.clear();
+            })), t.Fc.clear();
         }(n, "'waitForPendingWrites' promise is rejected due to a user change."), 
         // TODO(b/114226417): Consider calling this only in the primary tab.
-        n.sharedClientState.handleUserChange(e, t.removedBatchIds, t.addedBatchIds), await wa(n, t.hi);
+        n.sharedClientState.handleUserChange(e, t.removedBatchIds, t.addedBatchIds), await Xc(n, t.qs);
     }
 }
 
-function ga(t, e) {
-    const n = K(t), s = n.ra.get(e);
-    if (s && s.Zu) return Xn().add(s.key);
+function tu(t, e) {
+    const n = K(t), s = n.Oc.get(e);
+    if (s && s.Sc) return On().add(s.key);
     {
-        let t = Xn();
-        const s = n.na.get(e);
+        let t = On();
+        const s = n.Nc.get(e);
         if (!s) return t;
         for (const e of s) {
-            const s = n.ea.get(e);
-            t = t.unionWith(s.view.Ku);
+            const s = n.Cc.get(e);
+            t = t.unionWith(s.view.yc);
         }
         return t;
     }
@@ -17961,10 +17557,10 @@ function ga(t, e) {
 /**
  * Reconcile the list of synced documents in an existing view with those
  * from persistence.
- */ async function ya(t, e) {
-    const n = K(t), s = await fo(n.localStore, e.query, 
-    /* usePreviousResults= */ !0), i = e.view.Yu(s);
-    return n.isPrimaryClient && fa(n, e.targetId, i.Hu), i;
+ */ async function eu(t, e) {
+    const n = K(t), s = await Hr(n.localStore, e.query, 
+    /* usePreviousResults= */ !0), i = e.view.vc(s);
+    return n.isPrimaryClient && Hc(n, e.targetId, i.Pc), i;
 }
 
 /**
@@ -17972,17 +17568,17 @@ function ga(t, e) {
  * snapshots if needed.
  */
 // PORTING NOTE: Multi-Tab only.
-async function pa(t, e) {
-    const n = K(t);
-    return wo(n.localStore, e).then((t => wa(n, t)));
+async function nu(t) {
+    const e = K(t);
+    return Yr(e.localStore).then((t => Xc(e, t)));
 }
 
 /** Applies a mutation state to an existing batch.  */
 // PORTING NOTE: Multi-Tab only.
-async function Ia(t, e, n, s) {
+async function su(t, e, n, s) {
     const i = K(t), r = await function(t, e) {
-        const n = K(t), s = K(n.Bs);
-        return n.persistence.runTransaction("Lookup mutation documents", "readonly", (t => s.fn(t, e).next((e => e ? n.ci.Ks(t, e) : pi.resolve(null)))));
+        const n = K(t), s = K(n.gs);
+        return n.persistence.runTransaction("Lookup mutation documents", "readonly", (t => s.Ge(t, e).next((e => e ? n.Us.Es(t, e) : si.resolve(null)))));
     }
     // PORTING NOTE: Multi-Tab only.
     (i.localStore, e);
@@ -17990,14 +17586,14 @@ async function Ia(t, e, n, s) {
     // If we are the primary client, we need to send this write to the
     // backend. Secondary clients will ignore these writes since their remote
     // connection is disabled.
-    await mu(i.remoteStore) : "acknowledged" === n || "rejected" === n ? (
+    await Zo(i.remoteStore) : "acknowledged" === n || "rejected" === n ? (
     // NOTE: Both these methods are no-ops for batches that originated from
     // other clients.
-    ca(i, e, s || null), aa(i, e), function(t, e) {
-        K(K(t).Bs)._n(e);
+    Qc(i, e, s || null), jc(i, e), function(t, e) {
+        K(K(t).gs).Qe(e);
     }
     // PORTING NOTE: Multi-Tab only.
-    (i.localStore, e)) : L(), await wa(i, r)) : 
+    (i.localStore, e)) : L(), await Xc(i, r)) : 
     // A throttled tab may not have seen the mutation before it was completed
     // and removed from the mutation queue, in which case we won't have cached
     // the affected documents. In this case we can safely ignore the update
@@ -18005,37 +17601,37 @@ async function Ia(t, e, n, s) {
     // had, we would have cached the affected documents), and so we will just
     // see any resulting document changes via normal remote document updates
     // as applicable.
-    O("SyncEngine", "Cannot apply mutation batch with id: " + e);
+    M("SyncEngine", "Cannot apply mutation batch with id: " + e);
 }
 
 /** Applies a query target change from a different tab. */
 // PORTING NOTE: Multi-Tab only.
-async function Ta(t, e) {
+async function iu(t, e) {
     const n = K(t);
-    if (Va(n), va(n), !0 === e && !0 !== n.ha) {
+    if (hu(n), lu(n), !0 === e && !0 !== n.Lc) {
         // Secondary tabs only maintain Views for their local listeners and the
         // Views internal state may not be 100% populated (in particular
         // secondary tabs don't track syncedDocuments, the set of documents the
         // server considers to be in the target). So when a secondary becomes
         // primary, we need to need to make sure that all views for all targets
         // match the state on disk.
-        const t = n.sharedClientState.getAllActiveQueryTargets(), e = await Ea(n, t.toArray());
-        n.ha = !0, await bu(n.remoteStore, !0);
-        for (const t of e) su(n.remoteStore, t);
-    } else if (!1 === e && !1 !== n.ha) {
+        const t = n.sharedClientState.getAllActiveQueryTargets(), e = await ru(n, t.toArray());
+        n.Lc = !0, await ac(n.remoteStore, !0);
+        for (const t of e) Lo(n.remoteStore, t);
+    } else if (!1 === e && !1 !== n.Lc) {
         const t = [];
         let e = Promise.resolve();
-        n.na.forEach(((s, i) => {
-            n.sharedClientState.isLocalQueryTarget(i) ? t.push(i) : e = e.then((() => (ha(n, i), 
-            lo(n.localStore, i, 
-            /*keepPersistedTargetData=*/ !0)))), iu(n.remoteStore, i);
-        })), await e, await Ea(n, t), 
+        n.Nc.forEach(((s, i) => {
+            n.sharedClientState.isLocalQueryTarget(i) ? t.push(i) : e = e.then((() => (Wc(n, i), 
+            zr(n.localStore, i, 
+            /*keepPersistedTargetData=*/ !0)))), Uo(n.remoteStore, i);
+        })), await e, await ru(n, t), 
         // PORTING NOTE: Multi-Tab only.
         function(t) {
             const e = K(t);
-            e.ra.forEach(((t, n) => {
-                iu(e.remoteStore, n);
-            })), e.oa.bi(), e.ra = new Map, e.ia = new Bn(xt.comparator);
+            e.Oc.forEach(((t, n) => {
+                Uo(e.remoteStore, n);
+            })), e.Mc.ii(), e.Oc = new Map, e.kc = new An(Nt.comparator);
         }
         /**
  * Reconcile the query views of the provided query targets with the state from
@@ -18048,35 +17644,35 @@ async function Ta(t, e) {
  * tab to a primary tab
  */
         // PORTING NOTE: Multi-Tab only.
-        (n), n.ha = !1, await bu(n.remoteStore, !1);
+        (n), n.Lc = !1, await ac(n.remoteStore, !1);
     }
 }
 
-async function Ea(t, e, n) {
+async function ru(t, e, n) {
     const s = K(t), i = [], r = [];
     for (const t of e) {
         let e;
-        const n = s.na.get(t);
+        const n = s.Nc.get(t);
         if (n && 0 !== n.length) {
             // For queries that have a local View, we fetch their current state
             // from LocalStore (as the resume token and the snapshot version
             // might have changed) and reconcile their views with the persisted
             // state (the list of syncedDocuments may have gotten out of sync).
-            e = await ho(s.localStore, Ge(n[0]));
+            e = await Wr(s.localStore, De(n[0]));
             for (const t of n) {
-                const e = s.ea.get(t), n = await ya(s, e);
+                const e = s.Cc.get(t), n = await eu(s, e);
                 n.snapshot && r.push(n.snapshot);
             }
         } else {
             // For queries that never executed on this client, we need to
             // allocate the target in LocalStore and initialize a new View.
-            const n = await _o(s.localStore, t);
-            e = await ho(s.localStore, n), await Zu(s, Aa(n), t, 
+            const n = await Jr(s.localStore, t);
+            e = await Wr(s.localStore, n), await Mc(s, ou(n), t, 
             /*current=*/ !1);
         }
         i.push(e);
     }
-    return s.ta.Qo(r), i;
+    return s.Dc.To(r), i;
 }
 
 /**
@@ -18090,38 +17686,36 @@ async function Ea(t, e, n) {
  * difference will not cause issues.
  */
 // PORTING NOTE: Multi-Tab only.
-function Aa(t) {
-    return Oe(t.path, t.collectionGroup, t.orderBy, t.filters, t.limit, "F" /* First */ , t.startAt, t.endAt);
+function ou(t) {
+    return Te(t.path, t.collectionGroup, t.orderBy, t.filters, t.limit, "F" /* First */ , t.startAt, t.endAt);
 }
 
 /** Returns the IDs of the clients that are currently active. */
 // PORTING NOTE: Multi-Tab only.
-function Ra(t) {
+function cu(t) {
     const e = K(t);
-    return K(K(e.localStore).persistence).Fs();
+    return K(K(e.localStore).persistence).ds();
 }
 
 /** Applies a query target change from a different tab. */
 // PORTING NOTE: Multi-Tab only.
-async function Pa(t, e, n, s) {
+async function uu(t, e, n, s) {
     const i = K(t);
-    if (i.ha) 
+    if (i.Lc) 
     // If we receive a target state notification via WebStorage, we are
     // either already secondary or another tab has taken the primary lease.
-    return void O("SyncEngine", "Ignoring unexpected query state notification.");
-    const r = i.na.get(e);
-    if (r && r.length > 0) switch (n) {
+    M("SyncEngine", "Ignoring unexpected query state notification."); else if (i.Nc.has(e)) switch (n) {
       case "current":
       case "not-current":
         {
-            const t = await wo(i.localStore, Je(r[0])), s = es.createSynthesizedRemoteEventForCurrentChange(e, "current" === n);
-            await wa(i, t, s);
+            const t = await Yr(i.localStore), s = Fn.createSynthesizedRemoteEventForCurrentChange(e, "current" === n);
+            await Xc(i, t, s);
             break;
         }
 
       case "rejected":
-        await lo(i.localStore, e, 
-        /* keepPersistedTargetData */ !0), ha(i, e, s);
+        await zr(i.localStore, e, 
+        /* keepPersistedTargetData */ !0), Wc(i, e, s);
         break;
 
       default:
@@ -18129,41 +17723,41 @@ async function Pa(t, e, n, s) {
     }
 }
 
-/** Adds or removes Watch targets for queries from different tabs. */ async function ba(t, e, n) {
-    const s = Va(t);
-    if (s.ha) {
+/** Adds or removes Watch targets for queries from different tabs. */ async function au(t, e, n) {
+    const s = hu(t);
+    if (s.Lc) {
         for (const t of e) {
-            if (s.na.has(t)) {
+            if (s.Nc.has(t)) {
                 // A target might have been added in a previous attempt
-                O("SyncEngine", "Adding an already active target " + t);
+                M("SyncEngine", "Adding an already active target " + t);
                 continue;
             }
-            const e = await _o(s.localStore, t), n = await ho(s.localStore, e);
-            await Zu(s, Aa(e), n.targetId, 
-            /*current=*/ !1), su(s.remoteStore, n);
+            const e = await Jr(s.localStore, t), n = await Wr(s.localStore, e);
+            await Mc(s, ou(e), n.targetId, 
+            /*current=*/ !1), Lo(s.remoteStore, n);
         }
         for (const t of n) 
         // Check that the target is still active since the target might have been
         // removed if it has been rejected by the backend.
-        s.na.has(t) && 
+        s.Nc.has(t) && 
         // Release queries that are still active.
-        await lo(s.localStore, t, 
+        await zr(s.localStore, t, 
         /* keepPersistedTargetData */ !1).then((() => {
-            iu(s.remoteStore, t), ha(s, t);
-        })).catch(Cr);
+            Uo(s.remoteStore, t), Wc(s, t);
+        })).catch(_r);
     }
 }
 
-function Va(t) {
+function hu(t) {
     const e = K(t);
-    return e.remoteStore.remoteSyncer.applyRemoteEvent = na.bind(null, e), e.remoteStore.remoteSyncer.getRemoteKeysForTarget = ga.bind(null, e), 
-    e.remoteStore.remoteSyncer.rejectListen = ia.bind(null, e), e.ta.Qo = $u.bind(null, e.eventManager), 
-    e.ta.fa = Bu.bind(null, e.eventManager), e;
+    return e.remoteStore.remoteSyncer.applyRemoteEvent = Bc.bind(null, e), e.remoteStore.remoteSyncer.getRemoteKeysForTarget = tu.bind(null, e), 
+    e.remoteStore.remoteSyncer.rejectListen = Uc.bind(null, e), e.Dc.To = Ec.bind(null, e.eventManager), 
+    e.Dc.qc = Tc.bind(null, e.eventManager), e;
 }
 
-function va(t) {
+function lu(t) {
     const e = K(t);
-    return e.remoteStore.remoteSyncer.applySuccessfulWrite = ra.bind(null, e), e.remoteStore.remoteSyncer.rejectFailedWrite = oa.bind(null, e), 
+    return e.remoteStore.remoteSyncer.applySuccessfulWrite = qc.bind(null, e), e.remoteStore.remoteSyncer.rejectFailedWrite = Kc.bind(null, e), 
     e;
 }
 
@@ -18174,21 +17768,19 @@ function va(t) {
  * @param syncEngine - SyncEngine to use.
  * @param bundleReader - Bundle to load into the SDK.
  * @param task - LoadBundleTask used to update the loading progress to public API.
- */ function Sa(t, e, n) {
+ */ function fu(t, e, n) {
     const s = K(t);
     // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        (
-    /** Loads a bundle and returns the list of affected collection groups. */
-    async function(t, e, n) {
+        (async function(t, e, n) {
         try {
             const s = await e.getMetadata();
             if (await function(t, e) {
-                const n = K(t), s = ms(e.createTime);
-                return n.persistence.runTransaction("hasNewerBundle", "readonly", (t => n._s.getBundleMetadata(t, e.id))).then((t => !!t && t.createTime.compareTo(s) >= 0));
+                const n = K(t), s = Zn(e.createTime);
+                return n.persistence.runTransaction("hasNewerBundle", "readonly", (t => n.Kn.getBundleMetadata(t, e.id))).then((t => !!t && t.createTime.compareTo(s) >= 0));
             }
             /**
  * Saves the given `BundleMetadata` to local persistence.
- */ (t.localStore, s)) return await e.close(), n._completeWith(function(t) {
+ */ (t.localStore, s)) return await e.close(), void n._completeWith(function(t) {
                 return {
                     taskState: "Success",
                     documentsLoaded: t.totalDocuments,
@@ -18196,28 +17788,31 @@ function va(t) {
                     totalDocuments: t.totalDocuments,
                     totalBytes: t.totalBytes
                 };
-            }(s)), Promise.resolve(new Set);
-            n._updateProgress(Qu(s));
-            const i = new Gu(s, t.localStore, e.M);
-            let r = await e.da();
+            }(s));
+            n._updateProgress(Vc(s));
+            const i = new vc(s, t.localStore, e.O);
+            let r = await e.Kc();
             for (;r; ) {
-                const t = await i.ku(r);
-                t && n._updateProgress(t), r = await e.da();
+                const t = await i.lc(r);
+                t && n._updateProgress(t), r = await e.Kc();
             }
             const o = await i.complete();
-            return await wa(t, o.Fu, 
+            // TODO(b/160876443): This currently raises snapshots with
+            // `fromCache=false` if users already listen to some queries and bundles
+            // has newer version.
+                        await Xc(t, o.ws, 
             /* remoteEvent */ void 0), 
             // Save metadata, so loading the same bundle will skip.
             await function(t, e) {
                 const n = K(t);
-                return n.persistence.runTransaction("Save bundle", "readwrite", (t => n._s.saveBundleMetadata(t, e)));
+                return n.persistence.runTransaction("Save bundle", "readwrite", (t => n.Kn.saveBundleMetadata(t, e)));
             }
             /**
  * Returns a promise of a `NamedQuery` associated with given query name. Promise
  * resolves to undefined if no persisted data can be found.
- */ (t.localStore, s), n._completeWith(o.progress), Promise.resolve(o.Ou);
+ */ (t.localStore, s), n._completeWith(o.progress);
         } catch (t) {
-            return $("SyncEngine", `Loading bundle failed with ${t}`), n._failWith(t), Promise.resolve(new Set);
+            F("SyncEngine", `Loading bundle failed with ${t}`), n._failWith(t);
         }
     }
     /**
@@ -18239,30 +17834,30 @@ function va(t) {
     /**
  * Provides all components needed for Firestore with in-memory persistence.
  * Uses EagerGC garbage collection.
- */)(s, e, n).then((t => {
-        s.sharedClientState.notifyBundleLoaded(t);
+ */)(s, e, n).then((() => {
+        s.sharedClientState.notifyBundleLoaded();
     }));
 }
 
-class Da {
+class du {
     constructor() {
         this.synchronizeTabs = !1;
     }
     async initialize(t) {
-        this.M = Wo(t.databaseInfo.databaseId), this.sharedClientState = this._a(t), this.persistence = this.wa(t), 
-        await this.persistence.start(), this.gcScheduler = this.ma(t), this.localStore = this.ga(t);
+        this.O = Do(t.databaseInfo.databaseId), this.sharedClientState = this.Gc(t), this.persistence = this.jc(t), 
+        await this.persistence.start(), this.gcScheduler = this.Qc(t), this.localStore = this.Wc(t);
     }
-    ma(t) {
+    Qc(t) {
         return null;
     }
-    ga(t) {
-        return so(this.persistence, new eo, t.initialUser, this.M);
+    Wc(t) {
+        return Lr(this.persistence, new Fr, t.initialUser, this.O);
     }
-    wa(t) {
-        return new Vo(So.zi, this.M);
+    jc(t) {
+        return new ao(lo.bi, this.O);
     }
-    _a(t) {
-        return new Bo;
+    Gc(t) {
+        return new To;
     }
     async terminate() {
         this.gcScheduler && this.gcScheduler.stop(), await this.sharedClientState.shutdown(), 
@@ -18272,32 +17867,32 @@ class Da {
 
 /**
  * Provides all components needed for Firestore with IndexedDB persistence.
- */ class Ca extends Da {
+ */ class _u extends du {
     constructor(t, e, n) {
-        super(), this.ya = t, this.cacheSizeBytes = e, this.forceOwnership = n, this.synchronizeTabs = !1;
+        super(), this.zc = t, this.cacheSizeBytes = e, this.forceOwnership = n, this.synchronizeTabs = !1;
     }
     async initialize(t) {
-        await super.initialize(t), await this.ya.initialize(this, t), 
+        await super.initialize(t), await Xr(this.localStore), await this.zc.initialize(this, t), 
         // Enqueue writes from a previous session
-        await va(this.ya.syncEngine), await mu(this.ya.remoteStore), 
+        await lu(this.zc.syncEngine), await Zo(this.zc.remoteStore), 
         // NOTE: This will immediately call the listener, so we make sure to
         // set it after localStore / remoteStore are started.
-        await this.persistence.Ts((() => (this.gcScheduler && !this.gcScheduler.started && this.gcScheduler.start(this.localStore), 
+        await this.persistence.Hn((() => (this.gcScheduler && !this.gcScheduler.started && this.gcScheduler.start(this.localStore), 
         Promise.resolve())));
     }
-    ga(t) {
-        return so(this.persistence, new eo, t.initialUser, this.M);
+    Wc(t) {
+        return Lr(this.persistence, new Fr, t.initialUser, this.O);
     }
-    ma(t) {
+    Qc(t) {
         const e = this.persistence.referenceDelegate.garbageCollector;
-        return new kr(e, t.asyncQueue);
+        return new gr(e, t.asyncQueue);
     }
-    wa(t) {
-        const e = Xr(t.databaseInfo.databaseId, t.databaseInfo.persistenceKey), n = void 0 !== this.cacheSizeBytes ? yr.withCacheSize(this.cacheSizeBytes) : yr.DEFAULT;
-        return new Hr(this.synchronizeTabs, e, t.clientId, n, t.asyncQueue, Qo(), jo(), this.M, this.sharedClientState, !!this.forceOwnership);
+    jc(t) {
+        const e = kr(t.databaseInfo.databaseId, t.databaseInfo.persistenceKey), n = void 0 !== this.cacheSizeBytes ? er.withCacheSize(this.cacheSizeBytes) : er.DEFAULT;
+        return new Cr(this.synchronizeTabs, e, t.clientId, n, t.asyncQueue, Vo(), So(), this.O, this.sharedClientState, !!this.forceOwnership);
     }
-    _a(t) {
-        return new Bo;
+    Gc(t) {
+        return new To;
     }
 }
 
@@ -18308,77 +17903,77 @@ class Da {
  * In the legacy client, this provider is used to provide both multi-tab and
  * non-multi-tab persistence since we cannot tell at build time whether
  * `synchronizeTabs` will be enabled.
- */ class xa extends Ca {
+ */ class wu extends _u {
     constructor(t, e) {
-        super(t, e, /* forceOwnership= */ !1), this.ya = t, this.cacheSizeBytes = e, this.synchronizeTabs = !0;
+        super(t, e, /* forceOwnership= */ !1), this.zc = t, this.cacheSizeBytes = e, this.synchronizeTabs = !0;
     }
     async initialize(t) {
         await super.initialize(t);
-        const e = this.ya.syncEngine;
-        this.sharedClientState instanceof $o && (this.sharedClientState.syncEngine = {
-            Mr: Ia.bind(null, e),
-            Or: Pa.bind(null, e),
-            Fr: ba.bind(null, e),
-            Fs: Ra.bind(null, e),
-            kr: pa.bind(null, e)
+        const e = this.zc.syncEngine;
+        this.sharedClientState instanceof Eo && (this.sharedClientState.syncEngine = {
+            hr: su.bind(null, e),
+            lr: uu.bind(null, e),
+            dr: au.bind(null, e),
+            ds: cu.bind(null, e),
+            ar: nu.bind(null, e)
         }, await this.sharedClientState.start()), 
         // NOTE: This will immediately call the listener, so we make sure to
         // set it after localStore / remoteStore are started.
-        await this.persistence.Ts((async t => {
-            await Ta(this.ya.syncEngine, t), this.gcScheduler && (t && !this.gcScheduler.started ? this.gcScheduler.start(this.localStore) : t || this.gcScheduler.stop());
+        await this.persistence.Hn((async t => {
+            await iu(this.zc.syncEngine, t), this.gcScheduler && (t && !this.gcScheduler.started ? this.gcScheduler.start(this.localStore) : t || this.gcScheduler.stop());
         }));
     }
-    _a(t) {
-        const e = Qo();
-        if (!$o.vt(e)) throw new Q(G.UNIMPLEMENTED, "IndexedDB persistence is only available on platforms that support LocalStorage.");
-        const n = Xr(t.databaseInfo.databaseId, t.databaseInfo.persistenceKey);
-        return new $o(e, t.asyncQueue, n, t.clientId, t.initialUser);
+    Gc(t) {
+        const e = Vo();
+        if (!Eo.Vt(e)) throw new j(G.UNIMPLEMENTED, "IndexedDB persistence is only available on platforms that support LocalStorage.");
+        const n = kr(t.databaseInfo.databaseId, t.databaseInfo.persistenceKey);
+        return new Eo(e, t.asyncQueue, n, t.clientId, t.initialUser);
     }
 }
 
 /**
  * Initializes and wires the components that are needed to interface with the
  * network.
- */ class Na {
+ */ class mu {
     async initialize(t, e) {
         this.localStore || (this.localStore = t.localStore, this.sharedClientState = t.sharedClientState, 
         this.datastore = this.createDatastore(e), this.remoteStore = this.createRemoteStore(e), 
         this.eventManager = this.createEventManager(e), this.syncEngine = this.createSyncEngine(e, 
-        /* startAsPrimary=*/ !t.synchronizeTabs), this.sharedClientState.onlineStateHandler = t => sa(this.syncEngine, t, 1 /* SharedClientState */), 
-        this.remoteStore.remoteSyncer.handleCredentialChange = ma.bind(null, this.syncEngine), 
-        await bu(this.remoteStore, this.syncEngine.isPrimaryClient));
+        /* startAsPrimary=*/ !t.synchronizeTabs), this.sharedClientState.onlineStateHandler = t => Lc(this.syncEngine, t, 1 /* SharedClientState */), 
+        this.remoteStore.remoteSyncer.handleCredentialChange = Zc.bind(null, this.syncEngine), 
+        await ac(this.remoteStore, this.syncEngine.isPrimaryClient));
     }
     createEventManager(t) {
-        return new Mu;
+        return new yc;
     }
     createDatastore(t) {
-        const e = Wo(t.databaseInfo.databaseId), n = (s = t.databaseInfo, new Go(s));
+        const e = Do(t.databaseInfo.databaseId), n = (s = t.databaseInfo, new vo(s));
         var s;
         /** Return the Platform-specific connectivity monitor. */        return function(t, e, n, s) {
-            return new Xo(t, e, n, s);
+            return new Oo(t, e, n, s);
         }(t.authCredentials, t.appCheckCredentials, n, e);
     }
     createRemoteStore(t) {
-        return e = this.localStore, n = this.datastore, s = t.asyncQueue, i = t => sa(this.syncEngine, t, 0 /* RemoteStore */), 
-        r = Uo.vt() ? new Uo : new Lo, new tu(e, n, s, i, r);
+        return e = this.localStore, n = this.datastore, s = t.asyncQueue, i = t => Lc(this.syncEngine, t, 0 /* RemoteStore */), 
+        r = Ro.Vt() ? new Ro : new Ao, new $o(e, n, s, i, r);
         var e, n, s, i, r;
         /** Re-enables the network. Idempotent. */    }
     createSyncEngine(t, e) {
         return function(t, e, n, 
         // PORTING NOTE: Manages state synchronization in multi-tab environments.
         s, i, r, o) {
-            const u = new Yu(t, e, n, s, i, r);
-            return o && (u.ha = !0), u;
+            const c = new kc(t, e, n, s, i, r);
+            return o && (c.Lc = !0), c;
         }(this.localStore, this.remoteStore, this.eventManager, this.sharedClientState, t.initialUser, t.maxConcurrentLimboResolutions, e);
     }
     terminate() {
         return async function(t) {
             const e = K(t);
-            O("RemoteStore", "RemoteStore shutting down."), e.fu.add(5 /* Shutdown */), await nu(e), 
-            e._u.shutdown(), 
+            M("RemoteStore", "RemoteStore shutting down."), e.Ko.add(5 /* Shutdown */), await Bo(e), 
+            e.jo.shutdown(), 
             // Set the OnlineState to Unknown (rather than Offline) to avoid potentially
             // triggering spurious listener events with cached data, etc.
-            e.wu.set("Unknown" /* Unknown */);
+            e.Qo.set("Unknown" /* Unknown */);
         }(this.remoteStore);
     }
 }
@@ -18410,7 +18005,7 @@ class Da {
  * @param bytesPerRead - How many bytes each `read()` from the returned reader
  *        will read.
  */
-function ka(t, e = 10240) {
+function gu(t, e = 10240) {
     let n = 0;
     // The TypeScript definition for ReadableStreamReader changed. We use
     // `any` here to allow this code to compile with different versions.
@@ -18476,7 +18071,7 @@ function ka(t, e = 10240) {
  * asynchronously. To allow immediate silencing, a mute call is added which
  * causes events scheduled to no longer be raised.
  */
-class Ma {
+class yu {
     constructor(t) {
         this.observer = t, 
         /**
@@ -18486,15 +18081,15 @@ class Ma {
         this.muted = !1;
     }
     next(t) {
-        this.observer.next && this.pa(this.observer.next, t);
+        this.observer.next && this.Hc(this.observer.next, t);
     }
     error(t) {
-        this.observer.error ? this.pa(this.observer.error, t) : console.error("Uncaught Error in snapshot listener:", t);
+        this.observer.error ? this.Hc(this.observer.error, t) : console.error("Uncaught Error in snapshot listener:", t);
     }
-    Ia() {
+    Jc() {
         this.muted = !0;
     }
-    pa(t, e) {
+    Hc(t, e) {
         this.muted || setTimeout((() => {
             this.muted || t(e);
         }), 0);
@@ -18522,32 +18117,32 @@ class Ma {
  *
  * Takes a bundle stream or buffer, and presents abstractions to read bundled
  * elements out of the underlying content.
- */ class Oa {
+ */ class pu {
     constructor(
     /** The reader to read from underlying binary bundle data source. */
     t, e) {
-        this.Ta = t, this.M = e, 
+        this.Yc = t, this.O = e, 
         /** Cached bundle metadata. */
-        this.metadata = new j, 
+        this.metadata = new Q, 
         /**
          * Internal buffer to hold bundle content, accumulating incomplete element
          * content.
          */
-        this.buffer = new Uint8Array, this.Ea = new TextDecoder("utf-8"), 
+        this.buffer = new Uint8Array, this.Xc = new TextDecoder("utf-8"), 
         // Read the metadata (which is the first element).
-        this.Aa().then((t => {
-            t && t.xu() ? this.metadata.resolve(t.payload.metadata) : this.metadata.reject(new Error(`The first element of the bundle is not a metadata, it is\n             ${JSON.stringify(null == t ? void 0 : t.payload)}`));
+        this.Zc().then((t => {
+            t && t.ac() ? this.metadata.resolve(t.payload.metadata) : this.metadata.reject(new Error(`The first element of the bundle is not a metadata, it is\n             ${JSON.stringify(null == t ? void 0 : t.payload)}`));
         }), (t => this.metadata.reject(t)));
     }
     close() {
-        return this.Ta.cancel();
+        return this.Yc.cancel();
     }
     async getMetadata() {
         return this.metadata.promise;
     }
-    async da() {
+    async Kc() {
         // Makes sure metadata is read before proceeding.
-        return await this.getMetadata(), this.Aa();
+        return await this.getMetadata(), this.Zc();
     }
     /**
      * Reads from the head of internal buffer, and pulling more data from
@@ -18558,15 +18153,15 @@ class Ma {
      *
      * Returns either the bundled element, or null if we have reached the end of
      * the stream.
-     */    async Aa() {
-        const t = await this.Ra();
+     */    async Zc() {
+        const t = await this.tu();
         if (null === t) return null;
-        const e = this.Ea.decode(t), n = Number(e);
-        isNaN(n) && this.Pa(`length string (${e}) is not valid number`);
-        const s = await this.ba(n);
-        return new qu(JSON.parse(s), t.length + n);
+        const e = this.Xc.decode(t), n = Number(e);
+        isNaN(n) && this.eu(`length string (${e}) is not valid number`);
+        const s = await this.nu(n);
+        return new Pc(JSON.parse(s), t.length + n);
     }
-    /** First index of '{' from the underlying buffer. */    Va() {
+    /** First index of '{' from the underlying buffer. */    su() {
         return this.buffer.findIndex((t => t === "{".charCodeAt(0)));
     }
     /**
@@ -18574,17 +18169,17 @@ class Ma {
      * return the content.
      *
      * If reached end of the stream, returns a null.
-     */    async Ra() {
-        for (;this.Va() < 0; ) {
-            if (await this.va()) break;
+     */    async tu() {
+        for (;this.su() < 0; ) {
+            if (await this.iu()) break;
         }
         // Broke out of the loop because underlying stream is closed, and there
         // happens to be no more data to process.
                 if (0 === this.buffer.length) return null;
-        const t = this.Va();
+        const t = this.su();
         // Broke out of the loop because underlying stream is closed, but still
         // cannot find an open bracket.
-                t < 0 && this.Pa("Reached the end of bundle when a length string is expected.");
+                t < 0 && this.eu("Reached the end of bundle when a length string is expected.");
         const e = this.buffer.slice(0, t);
         // Update the internal buffer to drop the read length.
                 return this.buffer = this.buffer.slice(t), e;
@@ -18594,23 +18189,23 @@ class Ma {
      * number of bytes, pulling more data from the underlying stream if needed.
      *
      * Returns a string decoded from the read bytes.
-     */    async ba(t) {
+     */    async nu(t) {
         for (;this.buffer.length < t; ) {
-            await this.va() && this.Pa("Reached the end of bundle when more is expected.");
+            await this.iu() && this.eu("Reached the end of bundle when more is expected.");
         }
-        const e = this.Ea.decode(this.buffer.slice(0, t));
+        const e = this.Xc.decode(this.buffer.slice(0, t));
         // Update the internal buffer to drop the read json string.
                 return this.buffer = this.buffer.slice(t), e;
     }
-    Pa(t) {
+    eu(t) {
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        throw this.Ta.cancel(), new Error(`Invalid bundle format: ${t}`);
+        throw this.Yc.cancel(), new Error(`Invalid bundle format: ${t}`);
     }
     /**
      * Pulls more data from underlying stream to internal buffer.
      * Returns a boolean indicating whether the stream is finished.
-     */    async va() {
-        const t = await this.Ta.read();
+     */    async iu() {
+        const t = await this.Yc.read();
         if (!t.done) {
             const e = new Uint8Array(this.buffer.length + t.value.length);
             e.set(this.buffer), e.set(t.value, this.buffer.length), this.buffer = e;
@@ -18639,7 +18234,7 @@ class Ma {
  * Internal transaction object responsible for accumulating the mutations to
  * perform and the base versions for any documents read.
  */
-class Fa {
+class Iu {
     constructor(t) {
         this.datastore = t, 
         // The version of each document that was read during this transaction.
@@ -18658,20 +18253,20 @@ class Fa {
         this.writtenDocs = new Set;
     }
     async lookup(t) {
-        if (this.ensureCommitNotCalled(), this.mutations.length > 0) throw new Q(G.INVALID_ARGUMENT, "Firestore transactions require all reads to be executed before all writes.");
+        if (this.ensureCommitNotCalled(), this.mutations.length > 0) throw new j(G.INVALID_ARGUMENT, "Firestore transactions require all reads to be executed before all writes.");
         const e = await async function(t, e) {
-            const n = K(t), s = As(n.M) + "/documents", i = {
-                documents: e.map((t => ps(n.M, t)))
-            }, r = await n.ho("BatchGetDocuments", s, i), o = new Map;
+            const n = K(t), s = os(n.O) + "/documents", i = {
+                documents: e.map((t => ns(n.O, t)))
+            }, r = await n.Lr("BatchGetDocuments", s, i), o = new Map;
             r.forEach((t => {
-                const e = Vs(n.M, t);
+                const e = hs(n.O, t);
                 o.set(e.key.toString(), e);
             }));
-            const u = [];
+            const c = [];
             return e.forEach((t => {
                 const e = o.get(t.toString());
-                U(!!e), u.push(e);
-            })), u;
+                U(!!e), c.push(e);
+            })), c;
         }(this.datastore, t);
         return e.forEach((t => this.recordVersion(t))), e;
     }
@@ -18687,7 +18282,7 @@ class Fa {
         this.writtenDocs.add(t.toString());
     }
     delete(t) {
-        this.write(new Cn(t, this.precondition(t))), this.writtenDocs.add(t.toString());
+        this.write(new mn(t, this.precondition(t))), this.writtenDocs.add(t.toString());
     }
     async commit() {
         if (this.ensureCommitNotCalled(), this.lastWriteError) throw this.lastWriteError;
@@ -18699,13 +18294,13 @@ class Fa {
         // For each document that was read but not written to, we want to perform
         // a `verify` operation.
         t.forEach(((t, e) => {
-            const n = xt.fromPath(e);
-            this.mutations.push(new xn(n, this.precondition(n)));
+            const n = Nt.fromPath(e);
+            this.mutations.push(new gn(n, this.precondition(n)));
         })), await async function(t, e) {
-            const n = K(t), s = As(n.M) + "/documents", i = {
-                writes: e.map((t => Ss(n.M, t)))
+            const n = K(t), s = os(n.O) + "/documents", i = {
+                writes: e.map((t => fs(n.O, t)))
             };
-            await n.oo("Commit", s, i);
+            await n.Mr("Commit", s, i);
         }(this.datastore, this.mutations), this.committed = !0;
     }
     recordVersion(t) {
@@ -18713,13 +18308,13 @@ class Fa {
         if (t.isFoundDocument()) e = t.version; else {
             if (!t.isNoDocument()) throw L();
             // For deleted docs, we must use baseVersion 0 when we overwrite them.
-            e = ct.min();
+            e = at.min();
         }
         const n = this.readVersions.get(t.key.toString());
         if (n) {
             if (!e.isEqual(n)) 
             // This transaction will fail no matter what.
-            throw new Q(G.ABORTED, "Document version changed between two reads.");
+            throw new j(G.ABORTED, "Document version changed between two reads.");
         } else this.readVersions.set(t.key.toString(), e);
     }
     /**
@@ -18727,7 +18322,7 @@ class Fa {
      * as a precondition, or no precondition if it was not read.
      */    precondition(t) {
         const e = this.readVersions.get(t.toString());
-        return !this.writtenDocs.has(t.toString()) && e ? yn.updateTime(e) : yn.none();
+        return !this.writtenDocs.has(t.toString()) && e ? nn.updateTime(e) : nn.none();
     }
     /**
      * Returns the precondition for a document if the operation is an update.
@@ -18736,7 +18331,7 @@ class Fa {
         // The first time a document is written, we want to take into account the
         // read time and existence
                 if (!this.writtenDocs.has(t.toString()) && e) {
-            if (e.isEqual(ct.min())) 
+            if (e.isEqual(at.min())) 
             // The document doesn't exist, so fail the transaction.
             // This has to be validated locally because you can't send a
             // precondition that a document does not exist without changing the
@@ -18746,13 +18341,13 @@ class Fa {
             // express that to the backend, we have to validate locally.
             // Note: this can change once we can send separate verify writes in the
             // transaction.
-            throw new Q(G.INVALID_ARGUMENT, "Can't update a document that doesn't exist.");
+            throw new j(G.INVALID_ARGUMENT, "Can't update a document that doesn't exist.");
             // Document exists, base precondition on document update time.
-                        return yn.updateTime(e);
+                        return nn.updateTime(e);
         }
         // Document was not read, so we just use the preconditions for a blind
         // update.
-        return yn.exists(!0);
+        return nn.exists(!0);
     }
     write(t) {
         this.ensureCommitNotCalled(), this.mutations.push(t);
@@ -18780,29 +18375,29 @@ class Fa {
  * TransactionRunner encapsulates the logic needed to run and retry transactions
  * with backoff.
  */
-class $a {
+class Eu {
     constructor(t, e, n, s) {
         this.asyncQueue = t, this.datastore = e, this.updateFunction = n, this.deferred = s, 
-        this.Sa = 5, this.Do = new zo(this.asyncQueue, "transaction_retry" /* TransactionRetry */);
+        this.ru = 5, this.ro = new Co(this.asyncQueue, "transaction_retry" /* TransactionRetry */);
     }
     /** Runs the transaction and sets the result on deferred. */    run() {
-        this.Sa -= 1, this.Da();
+        this.ru -= 1, this.ou();
     }
-    Da() {
-        this.Do.To((async () => {
-            const t = new Fa(this.datastore), e = this.Ca(t);
+    ou() {
+        this.ro.Hr((async () => {
+            const t = new Iu(this.datastore), e = this.cu(t);
             e && e.then((e => {
                 this.asyncQueue.enqueueAndForget((() => t.commit().then((() => {
                     this.deferred.resolve(e);
                 })).catch((t => {
-                    this.xa(t);
+                    this.uu(t);
                 }))));
             })).catch((t => {
-                this.xa(t);
+                this.uu(t);
             }));
         }));
     }
-    Ca(t) {
+    cu(t) {
         try {
             const e = this.updateFunction(t);
             return !St(e) && e.catch && e.then ? e : (this.deferred.reject(Error("Transaction callback must return a Promise")), 
@@ -18812,16 +18407,16 @@ class $a {
             return this.deferred.reject(t), null;
         }
     }
-    xa(t) {
-        this.Sa > 0 && this.Na(t) ? (this.Sa -= 1, this.asyncQueue.enqueueAndForget((() => (this.Da(), 
+    uu(t) {
+        this.ru > 0 && this.au(t) ? (this.ru -= 1, this.asyncQueue.enqueueAndForget((() => (this.ou(), 
         Promise.resolve())))) : this.deferred.reject(t);
     }
-    Na(t) {
+    au(t) {
         if ("FirebaseError" === t.name) {
             // In transactions, the backend will fail outdated reads with FAILED_PRECONDITION and
             // non-matching document versions with ABORTED. These errors should be retried.
             const e = t.code;
-            return "aborted" === e || "failed-precondition" === e || !On(e);
+            return "aborted" === e || "failed-precondition" === e || !En(e);
         }
         return !1;
     }
@@ -18848,7 +18443,7 @@ class $a {
  * pieces of the client SDK architecture. It is responsible for creating the
  * async queue that is shared by all of the other components in the system.
  */
-class Ba {
+class Tu {
     constructor(t, e, 
     /**
      * Asynchronous queue responsible for all of our internal processing. When
@@ -18862,9 +18457,9 @@ class Ba {
         this.authCredentials = t, this.appCheckCredentials = e, this.asyncQueue = n, this.databaseInfo = s, 
         this.user = C.UNAUTHENTICATED, this.clientId = it.R(), this.authCredentialListener = () => Promise.resolve(), 
         this.appCheckCredentialListener = () => Promise.resolve(), this.authCredentials.start(n, (async t => {
-            O("FirestoreClient", "Received user=", t.uid), await this.authCredentialListener(t), 
+            M("FirestoreClient", "Received user=", t.uid), await this.authCredentialListener(t), 
             this.user = t;
-        })), this.appCheckCredentials.start(n, (t => (O("FirestoreClient", "Received new app check token=", t), 
+        })), this.appCheckCredentials.start(n, (t => (M("FirestoreClient", "Received new app check token=", t), 
         this.appCheckCredentialListener(t, this.user))));
     }
     async getConfiguration() {
@@ -18888,11 +18483,11 @@ class Ba {
      * Checks that the client has not been terminated. Ensures that other methods on
      * this class cannot be called after the client is terminated.
      */    verifyNotTerminated() {
-        if (this.asyncQueue.isShuttingDown) throw new Q(G.FAILED_PRECONDITION, "The client has already been terminated.");
+        if (this.asyncQueue.isShuttingDown) throw new j(G.FAILED_PRECONDITION, "The client has already been terminated.");
     }
     terminate() {
         this.asyncQueue.enterRestrictedMode();
-        const t = new j;
+        const t = new Q;
         return this.asyncQueue.enqueueAndForgetEvenWhileRestricted((async () => {
             try {
                 this.onlineComponents && await this.onlineComponents.terminate(), this.offlineComponents && await this.offlineComponents.terminate(), 
@@ -18901,88 +18496,88 @@ class Ba {
                 // tokens.
                 this.authCredentials.shutdown(), this.appCheckCredentials.shutdown(), t.resolve();
             } catch (e) {
-                const n = Du(e, "Failed to shutdown persistence");
+                const n = dc(e, "Failed to shutdown persistence");
                 t.reject(n);
             }
         })), t.promise;
     }
 }
 
-async function La(t, e) {
-    t.asyncQueue.verifyOperationInProgress(), O("FirestoreClient", "Initializing OfflineComponentProvider");
+async function Au(t, e) {
+    t.asyncQueue.verifyOperationInProgress(), M("FirestoreClient", "Initializing OfflineComponentProvider");
     const n = await t.getConfiguration();
     await e.initialize(n);
     let s = n.initialUser;
     t.setCredentialChangeListener((async t => {
-        s.isEqual(t) || (await io(e.localStore, t), s = t);
+        s.isEqual(t) || (await Ur(e.localStore, t), s = t);
     })), 
     // When a user calls clearPersistence() in one client, all other clients
     // need to be terminated to allow the delete to succeed.
     e.persistence.setDatabaseDeletedListener((() => t.terminate())), t.offlineComponents = e;
 }
 
-async function Ua(t, e) {
+async function Ru(t, e) {
     t.asyncQueue.verifyOperationInProgress();
-    const n = await qa(t);
-    O("FirestoreClient", "Initializing OnlineComponentProvider");
+    const n = await Pu(t);
+    M("FirestoreClient", "Initializing OnlineComponentProvider");
     const s = await t.getConfiguration();
     await e.initialize(n, s), 
     // The CredentialChangeListener of the online component provider takes
     // precedence over the offline component provider.
-    t.setCredentialChangeListener((t => Pu(e.remoteStore, t))), t.setAppCheckTokenChangeListener(((t, n) => Pu(e.remoteStore, n))), 
+    t.setCredentialChangeListener((t => uc(e.remoteStore, t))), t.setAppCheckTokenChangeListener(((t, n) => uc(e.remoteStore, n))), 
     t.onlineComponents = e;
 }
 
-async function qa(t) {
-    return t.offlineComponents || (O("FirestoreClient", "Using default OfflineComponentProvider"), 
-    await La(t, new Da)), t.offlineComponents;
+async function Pu(t) {
+    return t.offlineComponents || (M("FirestoreClient", "Using default OfflineComponentProvider"), 
+    await Au(t, new du)), t.offlineComponents;
 }
 
-async function Ka(t) {
-    return t.onlineComponents || (O("FirestoreClient", "Using default OnlineComponentProvider"), 
-    await Ua(t, new Na)), t.onlineComponents;
+async function bu(t) {
+    return t.onlineComponents || (M("FirestoreClient", "Using default OnlineComponentProvider"), 
+    await Ru(t, new mu)), t.onlineComponents;
 }
 
-function Ga(t) {
-    return qa(t).then((t => t.persistence));
+function vu(t) {
+    return Pu(t).then((t => t.persistence));
 }
 
-function Qa(t) {
-    return qa(t).then((t => t.localStore));
+function Vu(t) {
+    return Pu(t).then((t => t.localStore));
 }
 
-function ja(t) {
-    return Ka(t).then((t => t.remoteStore));
+function Su(t) {
+    return bu(t).then((t => t.remoteStore));
 }
 
-function Wa(t) {
-    return Ka(t).then((t => t.syncEngine));
+function Du(t) {
+    return bu(t).then((t => t.syncEngine));
 }
 
-async function za(t) {
-    const e = await Ka(t), n = e.eventManager;
-    return n.onListen = Xu.bind(null, e.syncEngine), n.onUnlisten = ta.bind(null, e.syncEngine), 
+async function Cu(t) {
+    const e = await bu(t), n = e.eventManager;
+    return n.onListen = Oc.bind(null, e.syncEngine), n.onUnlisten = $c.bind(null, e.syncEngine), 
     n;
 }
 
-/** Enables the network connection and re-enqueues all pending operations. */ function Ha(t) {
+/** Enables the network connection and re-enqueues all pending operations. */ function Nu(t) {
     return t.asyncQueue.enqueue((async () => {
-        const e = await Ga(t), n = await ja(t);
+        const e = await vu(t), n = await Su(t);
         return e.setNetworkEnabled(!0), function(t) {
             const e = K(t);
-            return e.fu.delete(0 /* UserDisabled */), eu(e);
+            return e.Ko.delete(0 /* UserDisabled */), Fo(e);
         }(n);
     }));
 }
 
-/** Disables the network connection. Pending operations will not complete. */ function Ja(t) {
+/** Disables the network connection. Pending operations will not complete. */ function xu(t) {
     return t.asyncQueue.enqueue((async () => {
-        const e = await Ga(t), n = await ja(t);
+        const e = await vu(t), n = await Su(t);
         return e.setNetworkEnabled(!1), async function(t) {
             const e = K(t);
-            e.fu.add(0 /* UserDisabled */), await nu(e), 
+            e.Ko.add(0 /* UserDisabled */), await Bo(e), 
             // Set the OnlineState to Offline so get()s return from cache, etc.
-            e.wu.set("Offline" /* Offline */);
+            e.Qo.set("Offline" /* Offline */);
         }(n);
     }));
 }
@@ -18991,36 +18586,36 @@ async function za(t) {
  * Returns a Promise that resolves when all writes that were pending at the time
  * this method was called received server acknowledgement. An acknowledgement
  * can be either acceptance or rejection.
- */ function Ya(t, e) {
-    const n = new j;
+ */ function ku(t, e) {
+    const n = new Q;
     return t.asyncQueue.enqueueAndForget((async () => async function(t, e, n) {
         try {
             const s = await function(t, e) {
                 const n = K(t);
-                return n.persistence.runTransaction("read document", "readonly", (t => n.ci.Ls(t, e)));
+                return n.persistence.runTransaction("read document", "readonly", (t => n.Us.ys(t, e)));
             }(t, e);
-            s.isFoundDocument() ? n.resolve(s) : s.isNoDocument() ? n.resolve(null) : n.reject(new Q(G.UNAVAILABLE, "Failed to get document from cache. (However, this document may exist on the server. Run again without setting 'source' in the GetOptions to attempt to retrieve the document from the server.)"));
+            s.isFoundDocument() ? n.resolve(s) : s.isNoDocument() ? n.resolve(null) : n.reject(new j(G.UNAVAILABLE, "Failed to get document from cache. (However, this document may exist on the server. Run again without setting 'source' in the GetOptions to attempt to retrieve the document from the server.)"));
         } catch (t) {
-            const s = Du(t, `Failed to get document '${e} from cache`);
+            const s = dc(t, `Failed to get document '${e} from cache`);
             n.reject(s);
         }
     }
     /**
  * Retrieves a latency-compensated document from the backend via a
  * SnapshotListener.
- */ (await Qa(t), e, n))), n.promise;
+ */ (await Vu(t), e, n))), n.promise;
 }
 
-function Xa(t, e, n = {}) {
-    const s = new j;
+function Ou(t, e, n = {}) {
+    const s = new Q;
     return t.asyncQueue.enqueueAndForget((async () => function(t, e, n, s, i) {
-        const r = new Ma({
+        const r = new yu({
             next: r => {
                 // Remove query first before passing event to user to avoid
                 // user actions affecting the now stale query.
-                e.enqueueAndForget((() => Fu(t, o)));
-                const u = r.docs.has(n);
-                !u && r.fromCache ? 
+                e.enqueueAndForget((() => Ic(t, o)));
+                const c = r.docs.has(n);
+                !c && r.fromCache ? 
                 // TODO(dimond): If we're online and the document doesn't
                 // exist then we resolve with a doc.exists set to false. If
                 // we're offline however, we reject the Promise in this
@@ -19028,65 +18623,65 @@ function Xa(t, e, n = {}) {
                 // the server so we can deliver that even when you're
                 // offline 2) Actually reject the Promise in the online case
                 // if the document doesn't exist.
-                i.reject(new Q(G.UNAVAILABLE, "Failed to get document because the client is offline.")) : u && r.fromCache && s && "server" === s.source ? i.reject(new Q(G.UNAVAILABLE, 'Failed to get document from server. (However, this document does exist in the local cache. Run again without setting source to "server" to retrieve the cached document.)')) : i.resolve(r);
+                i.reject(new j(G.UNAVAILABLE, "Failed to get document because the client is offline.")) : c && r.fromCache && s && "server" === s.source ? i.reject(new j(G.UNAVAILABLE, 'Failed to get document from server. (However, this document does exist in the local cache. Run again without setting source to "server" to retrieve the cached document.)')) : i.resolve(r);
             },
             error: t => i.reject(t)
-        }), o = new Uu(Fe(n.path), r, {
+        }), o = new Rc(Ae(n.path), r, {
             includeMetadataChanges: !0,
-            Cu: !0
+            uc: !0
         });
-        return Ou(t, o);
-    }(await za(t), t.asyncQueue, e, n, s))), s.promise;
+        return pc(t, o);
+    }(await Cu(t), t.asyncQueue, e, n, s))), s.promise;
 }
 
-function Za(t, e) {
-    const n = new j;
+function Mu(t, e) {
+    const n = new Q;
     return t.asyncQueue.enqueueAndForget((async () => async function(t, e, n) {
         try {
-            const s = await fo(t, e, 
-            /* usePreviousResults= */ !0), i = new zu(e, s.li), r = i.Gu(s.documents), o = i.applyChanges(r, 
+            const s = await Hr(t, e, 
+            /* usePreviousResults= */ !0), i = new Cc(e, s.Ks), r = i.Ic(s.documents), o = i.applyChanges(r, 
             /* updateLimboDocuments= */ !1);
             n.resolve(o.snapshot);
         } catch (t) {
-            const s = Du(t, `Failed to execute query '${e} against cache`);
+            const s = dc(t, `Failed to execute query '${e} against cache`);
             n.reject(s);
         }
     }
     /**
  * Retrieves a latency-compensated query snapshot from the backend via a
  * SnapshotListener.
- */ (await Qa(t), e, n))), n.promise;
+ */ (await Vu(t), e, n))), n.promise;
 }
 
-function tc(t, e, n = {}) {
-    const s = new j;
+function $u(t, e, n = {}) {
+    const s = new Q;
     return t.asyncQueue.enqueueAndForget((async () => function(t, e, n, s, i) {
-        const r = new Ma({
+        const r = new yu({
             next: n => {
                 // Remove query first before passing event to user to avoid
                 // user actions affecting the now stale query.
-                e.enqueueAndForget((() => Fu(t, o))), n.fromCache && "server" === s.source ? i.reject(new Q(G.UNAVAILABLE, 'Failed to get documents from server. (However, these documents may exist in the local cache. Run again without setting source to "server" to retrieve the cached documents.)')) : i.resolve(n);
+                e.enqueueAndForget((() => Ic(t, o))), n.fromCache && "server" === s.source ? i.reject(new j(G.UNAVAILABLE, 'Failed to get documents from server. (However, these documents may exist in the local cache. Run again without setting source to "server" to retrieve the cached documents.)')) : i.resolve(n);
             },
             error: t => i.reject(t)
-        }), o = new Uu(n, r, {
+        }), o = new Rc(n, r, {
             includeMetadataChanges: !0,
-            Cu: !0
+            uc: !0
         });
-        return Ou(t, o);
-    }(await za(t), t.asyncQueue, e, n, s))), s.promise;
+        return pc(t, o);
+    }(await Cu(t), t.asyncQueue, e, n, s))), s.promise;
 }
 
-function ec(t, e) {
-    const n = new Ma(e);
+function Fu(t, e) {
+    const n = new yu(e);
     return t.asyncQueue.enqueueAndForget((async () => function(t, e) {
-        K(t).Eu.add(e), 
+        K(t).Zo.add(e), 
         // Immediately fire an initial event, indicating all existing listeners
         // are in-sync.
         e.next();
-    }(await za(t), n))), () => {
-        n.Ia(), t.asyncQueue.enqueueAndForget((async () => function(t, e) {
-            K(t).Eu.delete(e);
-        }(await za(t), n)));
+    }(await Cu(t), n))), () => {
+        n.Jc(), t.asyncQueue.enqueueAndForget((async () => function(t, e) {
+            K(t).Zo.delete(e);
+        }(await Cu(t), n)));
     };
 }
 
@@ -19104,25 +18699,25 @@ function ec(t, e) {
  * accessed with the transaction will not reflect local changes that have not
  * been committed. For this reason, it is required that all reads are
  * performed before any writes. Transactions must be performed while online.
- */ function nc(t, e) {
-    const n = new j;
+ */ function Bu(t, e) {
+    const n = new Q;
     return t.asyncQueue.enqueueAndForget((async () => {
         const s = await function(t) {
-            return Ka(t).then((t => t.datastore));
+            return bu(t).then((t => t.datastore));
         }(t);
-        new $a(t.asyncQueue, s, e, n).run();
+        new Eu(t.asyncQueue, s, e, n).run();
     })), n.promise;
 }
 
-function sc(t, e, n, s) {
+function Lu(t, e, n, s) {
     const i = function(t, e) {
         let n;
         n = "string" == typeof t ? (new TextEncoder).encode(t) : t;
         return function(t, e) {
-            return new Oa(t, e);
+            return new pu(t, e);
         }(function(t, e) {
-            if (t instanceof Uint8Array) return ka(t, e);
-            if (t instanceof ArrayBuffer) return ka(new Uint8Array(t), e);
+            if (t instanceof Uint8Array) return gu(t, e);
+            if (t instanceof ArrayBuffer) return gu(new Uint8Array(t), e);
             if (t instanceof ReadableStream) return t.getReader();
             throw new Error("Source of `toByteStreamReader` has to be a ArrayBuffer or ReadableStream");
         }(n), e);
@@ -19142,20 +18737,20 @@ function sc(t, e, n, s) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ (n, Wo(e));
+ */ (n, Do(e));
     t.asyncQueue.enqueueAndForget((async () => {
-        Sa(await Wa(t), i, s);
+        fu(await Du(t), i, s);
     }));
 }
 
-function ic(t, e) {
+function Uu(t, e) {
     return t.asyncQueue.enqueue((async () => function(t, e) {
         const n = K(t);
-        return n.persistence.runTransaction("Get named query", "readonly", (t => n._s.getNamedQuery(t, e)));
-    }(await Qa(t), e)));
+        return n.persistence.runTransaction("Get named query", "readonly", (t => n.Kn.getNamedQuery(t, e)));
+    }(await Vu(t), e)));
 }
 
-const rc = new Map;
+const qu = new Map;
 
 /**
  * An instance map that ensures only one Datastore exists per Firestore
@@ -19177,29 +18772,29 @@ const rc = new Map;
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-function oc(t, e, n) {
-    if (!n) throw new Q(G.INVALID_ARGUMENT, `Function ${t}() cannot be called with an empty ${e}.`);
+function Ku(t, e, n) {
+    if (!n) throw new j(G.INVALID_ARGUMENT, `Function ${t}() cannot be called with an empty ${e}.`);
 }
 
 /**
  * Validates that two boolean options are not set at the same time.
  * @internal
- */ function uc(t, e, n, s) {
-    if (!0 === e && !0 === s) throw new Q(G.INVALID_ARGUMENT, `${t} and ${n} cannot be used together.`);
+ */ function Gu(t, e, n, s) {
+    if (!0 === e && !0 === s) throw new j(G.INVALID_ARGUMENT, `${t} and ${n} cannot be used together.`);
 }
 
 /**
  * Validates that `path` refers to a document (indicated by the fact it contains
  * an even numbers of segments).
- */ function ac(t) {
-    if (!xt.isDocumentKey(t)) throw new Q(G.INVALID_ARGUMENT, `Invalid document reference. Document references must have an even number of segments, but ${t} has ${t.length}.`);
+ */ function ju(t) {
+    if (!Nt.isDocumentKey(t)) throw new j(G.INVALID_ARGUMENT, `Invalid document reference. Document references must have an even number of segments, but ${t} has ${t.length}.`);
 }
 
 /**
  * Validates that `path` refers to a collection (indicated by the fact it
  * contains an odd numbers of segments).
- */ function cc(t) {
-    if (xt.isDocumentKey(t)) throw new Q(G.INVALID_ARGUMENT, `Invalid collection reference. Collection references must have an odd number of segments, but ${t} has ${t.length}.`);
+ */ function Qu(t) {
+    if (Nt.isDocumentKey(t)) throw new j(G.INVALID_ARGUMENT, `Invalid collection reference. Collection references must have an odd number of segments, but ${t} has ${t.length}.`);
 }
 
 /**
@@ -19207,7 +18802,7 @@ function oc(t, e, n) {
  * (i.e. excludes Array, Date, etc.).
  */
 /** Returns a string describing the type / value of the provided input. */
-function hc(t) {
+function Wu(t) {
     if (void 0 === t) return "undefined";
     if (null === t) return "null";
     if ("string" == typeof t) return t.length > 20 && (t = `${t.substring(0, 20)}...`), 
@@ -19236,24 +18831,24 @@ function hc(t) {
     return "function" == typeof t ? "a function" : L();
 }
 
-function lc(t, 
+function zu(t, 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 e) {
     if ("_delegate" in t && (
     // Unwrap Compat types
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     t = t._delegate), !(t instanceof e)) {
-        if (e.name === t.constructor.name) throw new Q(G.INVALID_ARGUMENT, "Type does not match the expected instance. Did you pass a reference from a different Firestore SDK?");
+        if (e.name === t.constructor.name) throw new j(G.INVALID_ARGUMENT, "Type does not match the expected instance. Did you pass a reference from a different Firestore SDK?");
         {
-            const n = hc(t);
-            throw new Q(G.INVALID_ARGUMENT, `Expected type '${e.name}', but it was: ${n}`);
+            const n = Wu(t);
+            throw new j(G.INVALID_ARGUMENT, `Expected type '${e.name}', but it was: ${n}`);
         }
     }
     return t;
 }
 
-function fc(t, e) {
-    if (e <= 0) throw new Q(G.INVALID_ARGUMENT, `Function ${t}() requires a positive number, but it was: ${e}.`);
+function Hu(t, e) {
+    if (e <= 0) throw new j(G.INVALID_ARGUMENT, `Function ${t}() requires a positive number, but it was: ${e}.`);
 }
 
 /**
@@ -19278,20 +18873,20 @@ function fc(t, e) {
  * user-supplied `FirestoreSettings` object. This is a separate type so that
  * defaults can be supplied and the value can be checked for equality.
  */
-class dc {
+class Ju {
     constructor(t) {
         var e;
         if (void 0 === t.host) {
-            if (void 0 !== t.ssl) throw new Q(G.INVALID_ARGUMENT, "Can't provide ssl option if host option is not set");
+            if (void 0 !== t.ssl) throw new j(G.INVALID_ARGUMENT, "Can't provide ssl option if host option is not set");
             this.host = "firestore.googleapis.com", this.ssl = true;
         } else this.host = t.host, this.ssl = null === (e = t.ssl) || void 0 === e || e;
         if (this.credentials = t.credentials, this.ignoreUndefinedProperties = !!t.ignoreUndefinedProperties, 
         void 0 === t.cacheSizeBytes) this.cacheSizeBytes = 41943040; else {
-            if (-1 !== t.cacheSizeBytes && t.cacheSizeBytes < 1048576) throw new Q(G.INVALID_ARGUMENT, "cacheSizeBytes must be at least 1048576");
+            if (-1 !== t.cacheSizeBytes && t.cacheSizeBytes < 1048576) throw new j(G.INVALID_ARGUMENT, "cacheSizeBytes must be at least 1048576");
             this.cacheSizeBytes = t.cacheSizeBytes;
         }
         this.experimentalForceLongPolling = !!t.experimentalForceLongPolling, this.experimentalAutoDetectLongPolling = !!t.experimentalAutoDetectLongPolling, 
-        this.useFetchStreams = !!t.useFetchStreams, uc("experimentalForceLongPolling", t.experimentalForceLongPolling, "experimentalAutoDetectLongPolling", t.experimentalAutoDetectLongPolling);
+        this.useFetchStreams = !!t.useFetchStreams, Gu("experimentalForceLongPolling", t.experimentalForceLongPolling, "experimentalAutoDetectLongPolling", t.experimentalAutoDetectLongPolling);
     }
     isEqual(t) {
         return this.host === t.host && this.ssl === t.ssl && this.credentials === t.credentials && this.cacheSizeBytes === t.cacheSizeBytes && this.experimentalForceLongPolling === t.experimentalForceLongPolling && this.experimentalAutoDetectLongPolling === t.experimentalAutoDetectLongPolling && this.ignoreUndefinedProperties === t.ignoreUndefinedProperties && this.useFetchStreams === t.useFetchStreams;
@@ -19318,18 +18913,18 @@ class dc {
  * The Cloud Firestore service interface.
  *
  * Do not call this constructor directly. Instead, use {@link getFirestore}.
- */ class _c {
+ */ class Yu {
     /** @hideconstructor */
     constructor(t, e, n) {
         this._authCredentials = e, this._appCheckCredentials = n, 
         /**
          * Whether it's a Firestore or Firestore Lite instance.
          */
-        this.type = "firestore-lite", this._persistenceKey = "(lite)", this._settings = new dc({}), 
-        this._settingsFrozen = !1, t instanceof vt ? this._databaseId = t : (this._app = t, 
+        this.type = "firestore-lite", this._persistenceKey = "(lite)", this._settings = new Ju({}), 
+        this._settingsFrozen = !1, t instanceof Vt ? this._databaseId = t : (this._app = t, 
         this._databaseId = function(t) {
-            if (!Object.prototype.hasOwnProperty.apply(t.options, [ "projectId" ])) throw new Q(G.INVALID_ARGUMENT, '"projectId" not provided in firebase.initializeApp.');
-            return new vt(t.options.projectId);
+            if (!Object.prototype.hasOwnProperty.apply(t.options, [ "projectId" ])) throw new j(G.INVALID_ARGUMENT, '"projectId" not provided in firebase.initializeApp.');
+            return new Vt(t.options.projectId);
         }
         /**
  * Modify this instance to communicate with the Cloud Firestore emulator.
@@ -19349,7 +18944,7 @@ class dc {
      * The {@link @firebase/app#FirebaseApp} associated with this `Firestore` service
      * instance.
      */    get app() {
-        if (!this._app) throw new Q(G.FAILED_PRECONDITION, "Firestore was not initialized using the Firebase SDK. 'app' is not available");
+        if (!this._app) throw new j(G.FAILED_PRECONDITION, "Firestore was not initialized using the Firebase SDK. 'app' is not available");
         return this._app;
     }
     get _initialized() {
@@ -19359,8 +18954,8 @@ class dc {
         return void 0 !== this._terminateTask;
     }
     _setSettings(t) {
-        if (this._settingsFrozen) throw new Q(G.FAILED_PRECONDITION, "Firestore has already been started and its settings can no longer be changed. You can only modify settings before calling any other methods on a Firestore object.");
-        this._settings = new dc(t), void 0 !== t.credentials && (this._authCredentials = function(t) {
+        if (this._settingsFrozen) throw new j(G.FAILED_PRECONDITION, "Firestore has already been started and its settings can no longer be changed. You can only modify settings before calling any other methods on a Firestore object.");
+        this._settings = new Ju(t), void 0 !== t.credentials && (this._authCredentials = function(t) {
             if (!t) return new z;
             switch (t.type) {
               case "gapi":
@@ -19373,7 +18968,7 @@ class dc {
                 return t.client;
 
               default:
-                throw new Q(G.INVALID_ARGUMENT, "makeAuthCredentialsProvider failed due to invalid credential type");
+                throw new j(G.INVALID_ARGUMENT, "makeAuthCredentialsProvider failed due to invalid credential type");
             }
         }(t.credentials));
     }
@@ -19405,16 +19000,16 @@ class dc {
  * when the `Firestore` instance is terminated.
  */
         return function(t) {
-            const e = rc.get(t);
-            e && (O("ComponentProvider", "Removing Datastore"), rc.delete(t), e.terminate());
+            const e = qu.get(t);
+            e && (M("ComponentProvider", "Removing Datastore"), qu.delete(t), e.terminate());
         }(this), Promise.resolve();
     }
 }
 
-function wc(t, e, n, s = {}) {
+function Xu(t, e, n, s = {}) {
     var i;
-    const r = (t = lc(t, _c))._getSettings();
-    if ("firestore.googleapis.com" !== r.host && r.host !== e && $("Host has been set in both settings() and useEmulator(), emulator host will be used"), 
+    const r = (t = zu(t, Yu))._getSettings();
+    if ("firestore.googleapis.com" !== r.host && r.host !== e && F("Host has been set in both settings() and useEmulator(), emulator host will be used"), 
     t._setSettings(Object.assign(Object.assign({}, r), {
         host: `${e}:${n}`,
         ssl: !1
@@ -19425,7 +19020,7 @@ function wc(t, e, n, s = {}) {
             // invalid field "uid" and missing field "sub" / "user_id".)
             e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["createMockUserToken"])(s.mockUserToken, null === (i = t._app) || void 0 === i ? void 0 : i.options.projectId);
             const r = s.mockUserToken.sub || s.mockUserToken.user_id;
-            if (!r) throw new Q(G.INVALID_ARGUMENT, "mockUserToken must contain 'sub' or 'user_id' field!");
+            if (!r) throw new j(G.INVALID_ARGUMENT, "mockUserToken must contain 'sub' or 'user_id' field!");
             n = new C(r);
         }
         t._authCredentials = new H(new W(e, n));
@@ -19452,7 +19047,7 @@ function wc(t, e, n, s = {}) {
  * A `DocumentReference` refers to a document location in a Firestore database
  * and can be used to write, read, or listen to the location. The document at
  * the referenced location may or may not exist.
- */ class mc {
+ */ class Zu {
     /** @hideconstructor */
     constructor(t, 
     /**
@@ -19480,17 +19075,17 @@ function wc(t, e, n, s = {}) {
     /**
      * The collection this `DocumentReference` belongs to.
      */    get parent() {
-        return new yc(this.firestore, this.converter, this._key.path.popLast());
+        return new ea(this.firestore, this.converter, this._key.path.popLast());
     }
     withConverter(t) {
-        return new mc(this.firestore, t, this._key);
+        return new Zu(this.firestore, t, this._key);
     }
 }
 
 /**
  * A `Query` refers to a query which you can read or listen to. You can also
  * construct refined `Query` objects by adding filters and ordering.
- */ class gc {
+ */ class ta {
     // This is the lite version of the Query class in the main SDK.
     /** @hideconstructor protected */
     constructor(t, 
@@ -19503,17 +19098,17 @@ function wc(t, e, n, s = {}) {
         this.type = "query", this.firestore = t;
     }
     withConverter(t) {
-        return new gc(this.firestore, t, this._query);
+        return new ta(this.firestore, t, this._query);
     }
 }
 
 /**
  * A `CollectionReference` object can be used for adding documents, getting
  * document references, and querying for documents (using {@link query}).
- */ class yc extends gc {
+ */ class ea extends ta {
     /** @hideconstructor */
     constructor(t, e, n) {
-        super(t, e, Fe(n)), this._path = n, 
+        super(t, e, Ae(n)), this._path = n, 
         /** The type of this Firestore reference. */
         this.type = "collection";
     }
@@ -19531,23 +19126,23 @@ function wc(t, e, n, s = {}) {
      * subcollection. If this isn't a subcollection, the reference is null.
      */    get parent() {
         const t = this._path.popLast();
-        return t.isEmpty() ? null : new mc(this.firestore, 
-        /* converter= */ null, new xt(t));
+        return t.isEmpty() ? null : new Zu(this.firestore, 
+        /* converter= */ null, new Nt(t));
     }
     withConverter(t) {
-        return new yc(this.firestore, t, this._path);
+        return new ea(this.firestore, t, this._path);
     }
 }
 
-function pc(t, e, ...n) {
-    if (t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), oc("collection", "path", e), t instanceof _c) {
+function na(t, e, ...n) {
+    if (t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), Ku("collection", "path", e), t instanceof Yu) {
         const s = _t.fromString(e, ...n);
-        return cc(s), new yc(t, /* converter= */ null, s);
+        return Qu(s), new ea(t, /* converter= */ null, s);
     }
     {
-        if (!(t instanceof mc || t instanceof yc)) throw new Q(G.INVALID_ARGUMENT, "Expected first argument to collection() to be a CollectionReference, a DocumentReference or FirebaseFirestore");
+        if (!(t instanceof Zu || t instanceof ea)) throw new j(G.INVALID_ARGUMENT, "Expected first argument to collection() to be a CollectionReference, a DocumentReference or FirebaseFirestore");
         const s = t._path.child(_t.fromString(e, ...n));
-        return cc(s), new yc(t.firestore, 
+        return Qu(s), new ea(t.firestore, 
         /* converter= */ null, s);
     }
 }
@@ -19564,32 +19159,32 @@ function pc(t, e, ...n) {
  * collection or subcollection with this ID as the last segment of its path
  * will be included. Cannot contain a slash.
  * @returns The created `Query`.
- */ function Ic(t, e) {
-    if (t = lc(t, _c), oc("collectionGroup", "collection id", e), e.indexOf("/") >= 0) throw new Q(G.INVALID_ARGUMENT, `Invalid collection ID '${e}' passed to function collectionGroup(). Collection IDs must not contain '/'.`);
-    return new gc(t, 
+ */ function sa(t, e) {
+    if (t = zu(t, Yu), Ku("collectionGroup", "collection id", e), e.indexOf("/") >= 0) throw new j(G.INVALID_ARGUMENT, `Invalid collection ID '${e}' passed to function collectionGroup(). Collection IDs must not contain '/'.`);
+    return new ta(t, 
     /* converter= */ null, 
     /**
  * Creates a new Query for a collection group query that matches all documents
  * within the provided collection group.
  */
     function(t) {
-        return new Me(_t.emptyPath(), t);
+        return new Ee(_t.emptyPath(), t);
     }(e));
 }
 
-function Tc(t, e, ...n) {
+function ia(t, e, ...n) {
     if (t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), 
     // We allow omission of 'pathString' but explicitly prohibit passing in both
     // 'undefined' and 'null'.
-    1 === arguments.length && (e = it.R()), oc("doc", "path", e), t instanceof _c) {
+    1 === arguments.length && (e = it.R()), Ku("doc", "path", e), t instanceof Yu) {
         const s = _t.fromString(e, ...n);
-        return ac(s), new mc(t, 
-        /* converter= */ null, new xt(s));
+        return ju(s), new Zu(t, 
+        /* converter= */ null, new Nt(s));
     }
     {
-        if (!(t instanceof mc || t instanceof yc)) throw new Q(G.INVALID_ARGUMENT, "Expected first argument to collection() to be a CollectionReference, a DocumentReference or FirebaseFirestore");
+        if (!(t instanceof Zu || t instanceof ea)) throw new j(G.INVALID_ARGUMENT, "Expected first argument to collection() to be a CollectionReference, a DocumentReference or FirebaseFirestore");
         const s = t._path.child(_t.fromString(e, ...n));
-        return ac(s), new mc(t.firestore, t instanceof yc ? t.converter : null, new xt(s));
+        return ju(s), new Zu(t.firestore, t instanceof ea ? t.converter : null, new Nt(s));
     }
 }
 
@@ -19600,8 +19195,8 @@ function Tc(t, e, ...n) {
  * @param right - A reference to compare.
  * @returns true if the references point to the same location in the same
  * Firestore database.
- */ function Ec(t, e) {
-    return t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e), (t instanceof mc || t instanceof yc) && (e instanceof mc || e instanceof yc) && (t.firestore === e.firestore && t.path === e.path && t.converter === e.converter);
+ */ function ra(t, e) {
+    return t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e), (t instanceof Zu || t instanceof ea) && (e instanceof Zu || e instanceof ea) && (t.firestore === e.firestore && t.path === e.path && t.converter === e.converter);
 }
 
 /**
@@ -19612,8 +19207,8 @@ function Tc(t, e, ...n) {
  * @param right - A `Query` to compare.
  * @returns true if the references point to the same location in the same
  * Firestore database.
- */ function Ac(t, e) {
-    return t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e), t instanceof gc && e instanceof gc && (t.firestore === e.firestore && je(t._query, e._query) && t.converter === e.converter);
+ */ function oa(t, e) {
+    return t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t), e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e), t instanceof ta && e instanceof ta && (t.firestore === e.firestore && Ne(t._query, e._query) && t.converter === e.converter);
 }
 
 /**
@@ -19631,42 +19226,42 @@ function Tc(t, e, ...n) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ class Rc {
+ */ class ca {
     constructor() {
         // The last promise in the queue.
-        this.ka = Promise.resolve(), 
+        this.hu = Promise.resolve(), 
         // A list of retryable operations. Retryable operations are run in order and
         // retried with backoff.
-        this.Ma = [], 
+        this.lu = [], 
         // Is this AsyncQueue being shut down? Once it is set to true, it will not
         // be changed again.
-        this.Oa = !1, 
+        this.fu = !1, 
         // Operations scheduled to be queued in the future. Operations are
         // automatically removed after they are run or canceled.
-        this.Fa = [], 
+        this.du = [], 
         // visible for testing
-        this.$a = null, 
+        this._u = null, 
         // Flag set while there's an outstanding AsyncQueue operation, used for
         // assertion sanity-checks.
-        this.Ba = !1, 
+        this.wu = !1, 
         // Enabled during shutdown on Safari to prevent future access to IndexedDB.
-        this.La = !1, 
+        this.mu = !1, 
         // List of TimerIds to fast-forward delays for.
-        this.Ua = [], 
+        this.gu = [], 
         // Backoff timer used to schedule retries for retryable operations
-        this.Do = new zo(this, "async_queue_retry" /* AsyncQueueRetry */), 
+        this.ro = new Co(this, "async_queue_retry" /* AsyncQueueRetry */), 
         // Visibility handler that triggers an immediate retry of all retryable
         // operations. Meant to speed up recovery when we regain file system access
         // after page comes into foreground.
-        this.qa = () => {
-            const t = jo();
-            t && O("AsyncQueue", "Visibility state changed to " + t.visibilityState), this.Do.Ao();
+        this.yu = () => {
+            const t = So();
+            t && M("AsyncQueue", "Visibility state changed to " + t.visibilityState), this.ro.Yr();
         };
-        const t = jo();
-        t && "function" == typeof t.addEventListener && t.addEventListener("visibilitychange", this.qa);
+        const t = So();
+        t && "function" == typeof t.addEventListener && t.addEventListener("visibilitychange", this.yu);
     }
     get isShuttingDown() {
-        return this.Oa;
+        return this.fu;
     }
     /**
      * Adds a new operation to the queue without waiting for it to complete (i.e.
@@ -19676,44 +19271,44 @@ function Tc(t, e, ...n) {
         this.enqueue(t);
     }
     enqueueAndForgetEvenWhileRestricted(t) {
-        this.Ka(), 
+        this.pu(), 
         // eslint-disable-next-line @typescript-eslint/no-floating-promises
-        this.Ga(t);
+        this.Iu(t);
     }
     enterRestrictedMode(t) {
-        if (!this.Oa) {
-            this.Oa = !0, this.La = t || !1;
-            const e = jo();
-            e && "function" == typeof e.removeEventListener && e.removeEventListener("visibilitychange", this.qa);
+        if (!this.fu) {
+            this.fu = !0, this.mu = t || !1;
+            const e = So();
+            e && "function" == typeof e.removeEventListener && e.removeEventListener("visibilitychange", this.yu);
         }
     }
     enqueue(t) {
-        if (this.Ka(), this.Oa) 
+        if (this.pu(), this.fu) 
         // Return a Promise which never resolves.
         return new Promise((() => {}));
         // Create a deferred Promise that we can return to the callee. This
         // allows us to return a "hanging Promise" only to the callee and still
         // advance the queue even when the operation is not run.
-                const e = new j;
-        return this.Ga((() => this.Oa && this.La ? Promise.resolve() : (t().then(e.resolve, e.reject), 
+                const e = new Q;
+        return this.Iu((() => this.fu && this.mu ? Promise.resolve() : (t().then(e.resolve, e.reject), 
         e.promise))).then((() => e.promise));
     }
     enqueueRetryable(t) {
-        this.enqueueAndForget((() => (this.Ma.push(t), this.Qa())));
+        this.enqueueAndForget((() => (this.lu.push(t), this.Eu())));
     }
     /**
      * Runs the next operation from the retryable queue. If the operation fails,
      * reschedules with backoff.
-     */    async Qa() {
-        if (0 !== this.Ma.length) {
+     */    async Eu() {
+        if (0 !== this.lu.length) {
             try {
-                await this.Ma[0](), this.Ma.shift(), this.Do.reset();
+                await this.lu[0](), this.lu.shift(), this.ro.reset();
             } catch (t) {
-                if (!Ri(t)) throw t;
+                if (!ui(t)) throw t;
  // Failure will be handled by AsyncQueue
-                                O("AsyncQueue", "Operation failed with retryable error: " + t);
+                                M("AsyncQueue", "Operation failed with retryable error: " + t);
             }
-            this.Ma.length > 0 && 
+            this.lu.length > 0 && 
             // If there are additional operations, we re-schedule `retryNextOp()`.
             // This is necessary to run retryable operations that failed during
             // their initial attempt since we don't know whether they are already
@@ -19724,12 +19319,12 @@ function Tc(t, e, ...n) {
             // Since `backoffAndRun()` cancels an existing backoff and schedules a
             // new backoff on every call, there is only ever a single additional
             // operation in the queue.
-            this.Do.To((() => this.Qa()));
+            this.ro.Hr((() => this.Eu()));
         }
     }
-    Ga(t) {
-        const e = this.ka.then((() => (this.Ba = !0, t().catch((t => {
-            this.$a = t, this.Ba = !1;
+    Iu(t) {
+        const e = this.hu.then((() => (this.wu = !0, t().catch((t => {
+            this._u = t, this.wu = !1;
             const e = 
             /**
  * Chrome includes Error.message in Error.stack. Other browsers do not.
@@ -19760,39 +19355,39 @@ function Tc(t, e, ...n) {
             // Re-throw the error so that this.tail becomes a rejected Promise and
             // all further attempts to chain (via .then) will just short-circuit
             // and return the rejected Promise.
-            throw F("INTERNAL UNHANDLED ERROR: ", e), t;
-        })).then((t => (this.Ba = !1, t))))));
-        return this.ka = e, e;
+            throw $("INTERNAL UNHANDLED ERROR: ", e), t;
+        })).then((t => (this.wu = !1, t))))));
+        return this.hu = e, e;
     }
     enqueueAfterDelay(t, e, n) {
-        this.Ka(), 
+        this.pu(), 
         // Fast-forward delays for timerIds that have been overriden.
-        this.Ua.indexOf(t) > -1 && (e = 0);
-        const s = Su.createAndSchedule(this, t, e, n, (t => this.ja(t)));
-        return this.Fa.push(s), s;
+        this.gu.indexOf(t) > -1 && (e = 0);
+        const s = fc.createAndSchedule(this, t, e, n, (t => this.Tu(t)));
+        return this.du.push(s), s;
     }
-    Ka() {
-        this.$a && L();
+    pu() {
+        this._u && L();
     }
     verifyOperationInProgress() {}
     /**
      * Waits until all currently queued tasks are finished executing. Delayed
      * operations are not run.
-     */    async Wa() {
+     */    async Au() {
         // Operations in the queue prior to draining may have enqueued additional
         // operations. Keep draining the queue until the tail is no longer advanced,
         // which indicates that no more new operations were enqueued and that all
         // operations were executed.
         let t;
         do {
-            t = this.ka, await t;
-        } while (t !== this.ka);
+            t = this.hu, await t;
+        } while (t !== this.hu);
     }
     /**
      * For Tests: Determine if a delayed operation with a particular TimerId
      * exists.
-     */    za(t) {
-        for (const e of this.Fa) if (e.timerId === t) return !0;
+     */    Ru(t) {
+        for (const e of this.du) if (e.timerId === t) return !0;
         return !1;
     }
     /**
@@ -19801,28 +19396,28 @@ function Tc(t, e, ...n) {
      * @param lastTimerId - Delayed operations up to and including this TimerId
      * will be drained. Pass TimerId.All to run all delayed operations.
      * @returns a Promise that resolves once all operations have been run.
-     */    Ha(t) {
+     */    Pu(t) {
         // Note that draining may generate more delayed ops, so we do that first.
-        return this.Wa().then((() => {
+        return this.Au().then((() => {
             // Run ops in the same order they'd run if they ran naturally.
-            this.Fa.sort(((t, e) => t.targetTimeMs - e.targetTimeMs));
-            for (const e of this.Fa) if (e.skipDelay(), "all" /* All */ !== t && e.timerId === t) break;
-            return this.Wa();
+            this.du.sort(((t, e) => t.targetTimeMs - e.targetTimeMs));
+            for (const e of this.du) if (e.skipDelay(), "all" /* All */ !== t && e.timerId === t) break;
+            return this.Au();
         }));
     }
     /**
      * For Tests: Skip all subsequent delays for a timer id.
-     */    Ja(t) {
-        this.Ua.push(t);
+     */    bu(t) {
+        this.gu.push(t);
     }
-    /** Called once a DelayedOperation is run or canceled. */    ja(t) {
+    /** Called once a DelayedOperation is run or canceled. */    Tu(t) {
         // NOTE: indexOf / slice are O(n), but delayedOperations is expected to be small.
-        const e = this.Fa.indexOf(t);
-        this.Fa.splice(e, 1);
+        const e = this.du.indexOf(t);
+        this.du.splice(e, 1);
     }
 }
 
-function Pc(t) {
+function ua(t) {
     /**
  * Returns true if obj is an object and contains at least one of the specified
  * methods.
@@ -19857,9 +19452,9 @@ function Pc(t) {
  */ (t, [ "next", "error", "complete" ]);
 }
 
-class bc {
+class aa {
     constructor() {
-        this._progressObserver = {}, this._taskCompletionResolver = new j, this._lastProgress = {
+        this._progressObserver = {}, this._taskCompletionResolver = new Q, this._lastProgress = {
             taskState: "Running",
             totalBytes: 0,
             totalDocuments: 0,
@@ -19941,27 +19536,27 @@ class bc {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/** DOMException error code constants. */ const Vc = -1;
+/** DOMException error code constants. */ const ha = -1;
 
 /**
  * The Cloud Firestore service interface.
  *
  * Do not call this constructor directly. Instead, use {@link getFirestore}.
  */
-class vc extends _c {
+class la extends Yu {
     /** @hideconstructor */
     constructor(t, e, n) {
         super(t, e, n), 
         /**
          * Whether it's a {@link Firestore} or Firestore Lite instance.
          */
-        this.type = "firestore", this._queue = new Rc, this._persistenceKey = "name" in t ? t.name : "[DEFAULT]";
+        this.type = "firestore", this._queue = new ca, this._persistenceKey = "name" in t ? t.name : "[DEFAULT]";
     }
     _terminate() {
         return this._firestoreClient || 
         // The client must be initialized to ensure that all subsequent API
         // usage throws an exception.
-        xc(this), this._firestoreClient.terminate();
+        wa(this), this._firestoreClient.terminate();
     }
 }
 
@@ -19975,14 +19570,14 @@ class vc extends _c {
  * be associated.
  * @param settings - A settings object to configure the {@link Firestore} instance.
  * @returns A newly initialized {@link Firestore} instance.
- */ function Sc(t, e) {
+ */ function fa(t, e) {
     const n = Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["_getProvider"])(t, "firestore");
     if (n.isInitialized()) {
         const t = n.getImmediate(), s = n.getOptions();
         if (Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["deepEqual"])(s, e)) return t;
-        throw new Q(G.FAILED_PRECONDITION, "initializeFirestore() has already been called with different options. To avoid this error, call initializeFirestore() with the same options as when it was originally called, or call getFirestore() to return the already initialized instance.");
+        throw new j(G.FAILED_PRECONDITION, "initializeFirestore() has already been called with different options. To avoid this error, call initializeFirestore() with the same options as when it was originally called, or call getFirestore() to return the already initialized instance.");
     }
-    if (void 0 !== e.cacheSizeBytes && -1 !== e.cacheSizeBytes && e.cacheSizeBytes < 1048576) throw new Q(G.INVALID_ARGUMENT, "cacheSizeBytes must be at least 1048576");
+    if (void 0 !== e.cacheSizeBytes && -1 !== e.cacheSizeBytes && e.cacheSizeBytes < 1048576) throw new j(G.INVALID_ARGUMENT, "cacheSizeBytes must be at least 1048576");
     return n.initialize({
         options: e
     });
@@ -19996,22 +19591,22 @@ class vc extends _c {
  * @param app - The {@link @firebase/app#FirebaseApp} instance that the returned {@link Firestore}
  * instance is associated with.
  * @returns The {@link Firestore} instance of the provided app.
- */ function Dc(e = Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["getApp"])()) {
+ */ function da(e = Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["getApp"])()) {
     return Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["_getProvider"])(e, "firestore").getImmediate();
 }
 
 /**
  * @internal
- */ function Cc(t) {
-    return t._firestoreClient || xc(t), t._firestoreClient.verifyNotTerminated(), t._firestoreClient;
+ */ function _a(t) {
+    return t._firestoreClient || wa(t), t._firestoreClient.verifyNotTerminated(), t._firestoreClient;
 }
 
-function xc(t) {
+function wa(t) {
     var e;
     const n = t._freezeSettings(), s = function(t, e, n, s) {
-        return new Vt(t, e, n, s.host, s.ssl, s.experimentalForceLongPolling, s.experimentalAutoDetectLongPolling, s.useFetchStreams);
+        return new vt(t, e, n, s.host, s.ssl, s.experimentalForceLongPolling, s.experimentalAutoDetectLongPolling, s.useFetchStreams);
     }(t._databaseId, (null === (e = t._app) || void 0 === e ? void 0 : e.options.appId) || "", t._persistenceKey, n);
-    t._firestoreClient = new Ba(t._authCredentials, t._appCheckCredentials, t._queue, s);
+    t._firestoreClient = new Tu(t._authCredentials, t._appCheckCredentials, t._queue, s);
 }
 
 /**
@@ -20036,10 +19631,10 @@ function xc(t) {
  * @param persistenceSettings - Optional settings object to configure
  * persistence.
  * @returns A `Promise` that represents successfully enabling persistent storage.
- */ function Nc(t, e) {
-    Kc(t = lc(t, vc));
-    const n = Cc(t), s = t._freezeSettings(), i = new Na;
-    return Mc(n, i, new Ca(i, s.cacheSizeBytes, null == e ? void 0 : e.forceOwnership));
+ */ function ma(t, e) {
+    ba(t = zu(t, la));
+    const n = _a(t), s = t._freezeSettings(), i = new mu;
+    return ya(n, i, new _u(i, s.cacheSizeBytes, null == e ? void 0 : e.forceOwnership));
 }
 
 /**
@@ -20063,10 +19658,10 @@ function xc(t) {
  * @param firestore - The {@link Firestore} instance to enable persistence for.
  * @returns A `Promise` that represents successfully enabling persistent
  * storage.
- */ function kc(t) {
-    Kc(t = lc(t, vc));
-    const e = Cc(t), n = t._freezeSettings(), s = new Na;
-    return Mc(e, s, new xa(s, n.cacheSizeBytes));
+ */ function ga(t) {
+    ba(t = zu(t, la));
+    const e = _a(t), n = t._freezeSettings(), s = new mu;
+    return ya(e, s, new wu(s, n.cacheSizeBytes));
 }
 
 /**
@@ -20074,11 +19669,11 @@ function xc(t) {
  * If the operation fails with a recoverable error (see
  * `canRecoverFromIndexedDbError()` below), the returned Promise is rejected
  * but the client remains usable.
- */ function Mc(t, e, n) {
-    const s = new j;
+ */ function ya(t, e, n) {
+    const s = new Q;
     return t.asyncQueue.enqueue((async () => {
         try {
-            await La(t, n), await Ua(t, e), s.resolve();
+            await Au(t, n), await Ru(t, e), s.resolve();
         } catch (t) {
             if (!
             /**
@@ -20132,16 +19727,16 @@ function xc(t) {
     })).then((() => s.promise));
 }
 
-function Oc(t) {
-    if (t._initialized && !t._terminated) throw new Q(G.FAILED_PRECONDITION, "Persistence can only be cleared before a Firestore instance is initialized or after it is terminated.");
-    const e = new j;
+function pa(t) {
+    if (t._initialized && !t._terminated) throw new j(G.FAILED_PRECONDITION, "Persistence can only be cleared before a Firestore instance is initialized or after it is terminated.");
+    const e = new Q;
     return t._queue.enqueueAndForgetEvenWhileRestricted((async () => {
         try {
             await async function(t) {
-                if (!Ti.vt()) return Promise.resolve();
+                if (!ri.Vt()) return Promise.resolve();
                 const e = t + "main";
-                await Ti.delete(e);
-            }(Xr(t._databaseId, t._persistenceKey)), e.resolve();
+                await ri.delete(e);
+            }(kr(t._databaseId, t._persistenceKey)), e.resolve();
         } catch (t) {
             e.reject(t);
         }
@@ -20163,11 +19758,11 @@ function Oc(t) {
  *
  * @returns A `Promise` which resolves when all currently pending writes have been
  * acknowledged by the backend.
- */ function Fc(t) {
+ */ function Ia(t) {
     return function(t) {
-        const e = new j;
-        return t.asyncQueue.enqueueAndForget((async () => ua(await Wa(t), e))), e.promise;
-    }(Cc(t = lc(t, vc)));
+        const e = new Q;
+        return t.asyncQueue.enqueueAndForget((async () => Gc(await Du(t), e))), e.promise;
+    }(_a(t = zu(t, la)));
 }
 
 /**
@@ -20175,8 +19770,8 @@ function Oc(t) {
  * call to {@link disableNetwork}.
  *
  * @returns A `Promise` that is resolved once the network has been enabled.
- */ function $c(t) {
-    return Ha(Cc(t = lc(t, vc)));
+ */ function Ea(t) {
+    return Nu(_a(t = zu(t, la)));
 }
 
 /**
@@ -20186,8 +19781,8 @@ function Oc(t) {
  * operations will be queued until the network is restored.
  *
  * @returns A `Promise` that is resolved once the network has been disabled.
- */ function Bc(t) {
-    return Ja(Cc(t = lc(t, vc)));
+ */ function Ta(t) {
+    return xu(_a(t = zu(t, la)));
 }
 
 /**
@@ -20211,7 +19806,7 @@ function Oc(t) {
  *
  * @returns A `Promise` that is resolved when the instance has been successfully
  * terminated.
- */ function Lc(t) {
+ */ function Aa(t) {
     return Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["_removeServiceInstance"])(t.app, "firestore"), t._delete();
 }
 
@@ -20225,9 +19820,9 @@ function Oc(t) {
  * @returns A `LoadBundleTask` object, which notifies callers with progress
  * updates, and completion or error events. It can be used as a
  * `Promise<LoadBundleTaskProgress>`.
- */ function Uc(t, e) {
-    const n = Cc(t = lc(t, vc)), s = new bc;
-    return sc(n, t._databaseId, e, s), s;
+ */ function Ra(t, e) {
+    const n = _a(t = zu(t, la)), s = new aa;
+    return Lu(n, t._databaseId, e, s), s;
 }
 
 /**
@@ -20241,12 +19836,12 @@ function Oc(t) {
  * @param firestore - The {@link Firestore} instance to read the query from.
  * @param name - The name of the query.
  * @returns A `Promise` that is resolved with the Query or `null`.
- */ function qc(t, e) {
-    return ic(Cc(t = lc(t, vc)), e).then((e => e ? new gc(t, null, e.query) : null));
+ */ function Pa(t, e) {
+    return Uu(_a(t = zu(t, la)), e).then((e => e ? new ta(t, null, e.query) : null));
 }
 
-function Kc(t) {
-    if (t._initialized || t._terminated) throw new Q(G.FAILED_PRECONDITION, "Firestore has already been started and persistence can no longer be enabled. You can only enable persistence before calling any other methods on a Firestore object.");
+function ba(t) {
+    if (t._initialized || t._terminated) throw new j(G.FAILED_PRECONDITION, "Firestore has already been started and persistence can no longer be enabled. You can only enable persistence before calling any other methods on a Firestore object.");
 }
 
 /**
@@ -20289,7 +19884,7 @@ function Kc(t) {
  * Create a `FieldPath` by providing field names. If more than one field
  * name is provided, the path will point to a nested field in a document.
  */
-class Gc {
+class va {
     /**
      * Creates a `FieldPath` from the provided field names. If more than one field
      * name is provided, the path will point to a nested field in a document.
@@ -20297,7 +19892,7 @@ class Gc {
      * @param fieldNames - A list of field names.
      */
     constructor(...t) {
-        for (let e = 0; e < t.length; ++e) if (0 === t[e].length) throw new Q(G.INVALID_ARGUMENT, "Invalid field name at argument $(i + 1). Field names must not be empty.");
+        for (let e = 0; e < t.length; ++e) if (0 === t[e].length) throw new j(G.INVALID_ARGUMENT, "Invalid field name at argument $(i + 1). Field names must not be empty.");
         this._internalPath = new mt(t);
     }
     /**
@@ -20313,8 +19908,8 @@ class Gc {
 /**
  * Returns a special sentinel `FieldPath` to refer to the ID of a document.
  * It can be used in queries to sort or filter by the document ID.
- */ function Qc() {
-    return new Gc("__name__");
+ */ function Va() {
+    return new va("__name__");
 }
 
 /**
@@ -20335,7 +19930,7 @@ class Gc {
  */
 /**
  * An immutable object representing an array of bytes.
- */ class jc {
+ */ class Sa {
     /** @hideconstructor */
     constructor(t) {
         this._byteString = t;
@@ -20347,9 +19942,9 @@ class Gc {
      * @param base64 - The Base64 string used to create the `Bytes` object.
      */    static fromBase64String(t) {
         try {
-            return new jc(pt.fromBase64String(t));
+            return new Sa(pt.fromBase64String(t));
         } catch (t) {
-            throw new Q(G.INVALID_ARGUMENT, "Failed to construct data from Base64 string: " + t);
+            throw new j(G.INVALID_ARGUMENT, "Failed to construct data from Base64 string: " + t);
         }
     }
     /**
@@ -20357,7 +19952,7 @@ class Gc {
      *
      * @param array - The Uint8Array used to create the `Bytes` object.
      */    static fromUint8Array(t) {
-        return new jc(pt.fromUint8Array(t));
+        return new Sa(pt.fromUint8Array(t));
     }
     /**
      * Returns the underlying bytes as a Base64-encoded string.
@@ -20409,7 +20004,7 @@ class Gc {
 /**
  * Sentinel values that can be used when writing document fields with `set()`
  * or `update()`.
- */ class Wc {
+ */ class Da {
     /**
      * @param _methodName - The public API endpoint that returns this class.
      * @hideconstructor
@@ -20441,7 +20036,7 @@ class Gc {
  *
  * Latitude values are in the range of [-90, 90].
  * Longitude values are in the range of [-180, 180].
- */ class zc {
+ */ class Ca {
     /**
      * Creates a new immutable `GeoPoint` object with the provided latitude and
      * longitude values.
@@ -20449,8 +20044,8 @@ class Gc {
      * @param longitude - The longitude as number between -180 and 180.
      */
     constructor(t, e) {
-        if (!isFinite(t) || t < -90 || t > 90) throw new Q(G.INVALID_ARGUMENT, "Latitude must be a number between -90 and 90, but was: " + t);
-        if (!isFinite(e) || e < -180 || e > 180) throw new Q(G.INVALID_ARGUMENT, "Longitude must be a number between -180 and 180, but was: " + e);
+        if (!isFinite(t) || t < -90 || t > 90) throw new j(G.INVALID_ARGUMENT, "Latitude must be a number between -90 and 90, but was: " + t);
+        if (!isFinite(e) || e < -180 || e > 180) throw new j(G.INVALID_ARGUMENT, "Longitude must be a number between -180 and 180, but was: " + e);
         this._lat = t, this._long = e;
     }
     /**
@@ -20500,29 +20095,29 @@ class Gc {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ const Hc = /^__.*__$/;
+ */ const Na = /^__.*__$/;
 
-/** The result of parsing document data (e.g. for a setData call). */ class Jc {
+/** The result of parsing document data (e.g. for a setData call). */ class xa {
     constructor(t, e, n) {
         this.data = t, this.fieldMask = e, this.fieldTransforms = n;
     }
     toMutation(t, e) {
-        return null !== this.fieldMask ? new Vn(t, this.data, this.fieldMask, e, this.fieldTransforms) : new bn(t, this.data, e, this.fieldTransforms);
+        return null !== this.fieldMask ? new fn(t, this.data, this.fieldMask, e, this.fieldTransforms) : new ln(t, this.data, e, this.fieldTransforms);
     }
 }
 
-/** The result of parsing "update" data (i.e. for an updateData call). */ class Yc {
+/** The result of parsing "update" data (i.e. for an updateData call). */ class ka {
     constructor(t, 
     // The fieldMask does not include document transforms.
     e, n) {
         this.data = t, this.fieldMask = e, this.fieldTransforms = n;
     }
     toMutation(t, e) {
-        return new Vn(t, this.data, this.fieldMask, e, this.fieldTransforms);
+        return new fn(t, this.data, this.fieldMask, e, this.fieldTransforms);
     }
 }
 
-function Xc(t) {
+function Oa(t) {
     switch (t) {
       case 0 /* Set */ :
  // fall through
@@ -20540,7 +20135,7 @@ function Xc(t) {
     }
 }
 
-/** A "context" object passed around while parsing user data. */ class Zc {
+/** A "context" object passed around while parsing user data. */ class Ma {
     /**
      * Initializes a ParseContext with the given source and path.
      *
@@ -20560,111 +20155,111 @@ function Xc(t) {
      * compromised).
      */
     constructor(t, e, n, s, i, r) {
-        this.settings = t, this.databaseId = e, this.M = n, this.ignoreUndefinedProperties = s, 
+        this.settings = t, this.databaseId = e, this.O = n, this.ignoreUndefinedProperties = s, 
         // Minor hack: If fieldTransforms is undefined, we assume this is an
         // external call and we need to validate the entire path.
-        void 0 === i && this.Ya(), this.fieldTransforms = i || [], this.fieldMask = r || [];
+        void 0 === i && this.vu(), this.fieldTransforms = i || [], this.fieldMask = r || [];
     }
     get path() {
         return this.settings.path;
     }
-    get Xa() {
-        return this.settings.Xa;
+    get Vu() {
+        return this.settings.Vu;
     }
-    /** Returns a new context with the specified settings overwritten. */    Za(t) {
-        return new Zc(Object.assign(Object.assign({}, this.settings), t), this.databaseId, this.M, this.ignoreUndefinedProperties, this.fieldTransforms, this.fieldMask);
+    /** Returns a new context with the specified settings overwritten. */    Su(t) {
+        return new Ma(Object.assign(Object.assign({}, this.settings), t), this.databaseId, this.O, this.ignoreUndefinedProperties, this.fieldTransforms, this.fieldMask);
     }
-    tc(t) {
+    Du(t) {
         var e;
-        const n = null === (e = this.path) || void 0 === e ? void 0 : e.child(t), s = this.Za({
+        const n = null === (e = this.path) || void 0 === e ? void 0 : e.child(t), s = this.Su({
             path: n,
-            ec: !1
+            Cu: !1
         });
-        return s.nc(t), s;
+        return s.Nu(t), s;
     }
-    sc(t) {
+    xu(t) {
         var e;
-        const n = null === (e = this.path) || void 0 === e ? void 0 : e.child(t), s = this.Za({
+        const n = null === (e = this.path) || void 0 === e ? void 0 : e.child(t), s = this.Su({
             path: n,
-            ec: !1
+            Cu: !1
         });
-        return s.Ya(), s;
+        return s.vu(), s;
     }
-    ic(t) {
+    ku(t) {
         // TODO(b/34871131): We don't support array paths right now; so make path
         // undefined.
-        return this.Za({
+        return this.Su({
             path: void 0,
-            ec: !0
+            Cu: !0
         });
     }
-    rc(t) {
-        return ph(t, this.settings.methodName, this.settings.oc || !1, this.path, this.settings.uc);
+    Ou(t) {
+        return nh(t, this.settings.methodName, this.settings.Mu || !1, this.path, this.settings.$u);
     }
     /** Returns 'true' if 'fieldPath' was traversed when creating this context. */    contains(t) {
         return void 0 !== this.fieldMask.find((e => t.isPrefixOf(e))) || void 0 !== this.fieldTransforms.find((e => t.isPrefixOf(e.field)));
     }
-    Ya() {
+    vu() {
         // TODO(b/34871131): Remove null check once we have proper paths for fields
         // within arrays.
-        if (this.path) for (let t = 0; t < this.path.length; t++) this.nc(this.path.get(t));
+        if (this.path) for (let t = 0; t < this.path.length; t++) this.Nu(this.path.get(t));
     }
-    nc(t) {
-        if (0 === t.length) throw this.rc("Document fields must not be empty");
-        if (Xc(this.Xa) && Hc.test(t)) throw this.rc('Document fields cannot begin and end with "__"');
+    Nu(t) {
+        if (0 === t.length) throw this.Ou("Document fields must not be empty");
+        if (Oa(this.Vu) && Na.test(t)) throw this.Ou('Document fields cannot begin and end with "__"');
     }
 }
 
 /**
  * Helper for parsing raw user input (provided via the API) into internal model
  * classes.
- */ class th {
+ */ class $a {
     constructor(t, e, n) {
-        this.databaseId = t, this.ignoreUndefinedProperties = e, this.M = n || Wo(t);
+        this.databaseId = t, this.ignoreUndefinedProperties = e, this.O = n || Do(t);
     }
-    /** Creates a new top-level parse context. */    ac(t, e, n, s = !1) {
-        return new Zc({
-            Xa: t,
+    /** Creates a new top-level parse context. */    Fu(t, e, n, s = !1) {
+        return new Ma({
+            Vu: t,
             methodName: e,
-            uc: n,
+            $u: n,
             path: mt.emptyPath(),
-            ec: !1,
-            oc: s
-        }, this.databaseId, this.M, this.ignoreUndefinedProperties);
+            Cu: !1,
+            Mu: s
+        }, this.databaseId, this.O, this.ignoreUndefinedProperties);
     }
 }
 
-function eh(t) {
-    const e = t._freezeSettings(), n = Wo(t._databaseId);
-    return new th(t._databaseId, !!e.ignoreUndefinedProperties, n);
+function Fa(t) {
+    const e = t._freezeSettings(), n = Do(t._databaseId);
+    return new $a(t._databaseId, !!e.ignoreUndefinedProperties, n);
 }
 
-/** Parse document data from a set() call. */ function nh(t, e, n, s, i, r = {}) {
-    const o = t.ac(r.merge || r.mergeFields ? 2 /* MergeSet */ : 0 /* Set */ , e, n, i);
-    wh("Data must be an object, but it was:", o, s);
-    const u = dh(s, o);
-    let a, c;
-    if (r.merge) a = new gt(o.fieldMask), c = o.fieldTransforms; else if (r.mergeFields) {
+/** Parse document data from a set() call. */ function Ba(t, e, n, s, i, r = {}) {
+    const o = t.Fu(r.merge || r.mergeFields ? 2 /* MergeSet */ : 0 /* Set */ , e, n, i);
+    Xa("Data must be an object, but it was:", o, s);
+    const c = Ja(s, o);
+    let u, a;
+    if (r.merge) u = new gt(o.fieldMask), a = o.fieldTransforms; else if (r.mergeFields) {
         const t = [];
         for (const s of r.mergeFields) {
-            const i = mh(e, s, n);
-            if (!o.contains(i)) throw new Q(G.INVALID_ARGUMENT, `Field '${i}' is specified in your field mask but missing from your input data.`);
-            Ih(t, i) || t.push(i);
+            const i = Za(e, s, n);
+            if (!o.contains(i)) throw new j(G.INVALID_ARGUMENT, `Field '${i}' is specified in your field mask but missing from your input data.`);
+            sh(t, i) || t.push(i);
         }
-        a = new gt(t), c = o.fieldTransforms.filter((t => a.covers(t.field)));
-    } else a = null, c = o.fieldTransforms;
-    return new Jc(new te(u), a, c);
+        u = new gt(t), a = o.fieldTransforms.filter((t => u.covers(t.field)));
+    } else u = null, a = o.fieldTransforms;
+    return new xa(new zt(c), u, a);
 }
 
-class sh extends Wc {
+class La extends Da {
     _toFieldTransform(t) {
-        if (2 /* MergeSet */ !== t.Xa) throw 1 /* Update */ === t.Xa ? t.rc(`${this._methodName}() can only appear at the top level of your update data`) : t.rc(`${this._methodName}() cannot be used with set() unless you pass {merge:true}`);
+        if (2 /* MergeSet */ !== t.Vu) throw 1 /* Update */ === t.Vu ? t.Ou(`${this._methodName}() can only appear at the top level of your update data`) : t.Ou(`${this._methodName}() cannot be used with set() unless you pass {merge:true}`);
         // No transform to add for a delete, but we need to add it to our
         // fieldMask so it gets deleted.
         return t.fieldMask.push(t.path), null;
     }
     isEqual(t) {
-        return t instanceof sh;
+        return t instanceof La;
     }
 }
 
@@ -20683,32 +20278,32 @@ class sh extends Wc {
  *     context.
  * @param context - The parent context.
  * @param arrayElement - Whether or not the FieldValue has an array.
- */ function ih(t, e, n) {
-    return new Zc({
-        Xa: 3 /* Argument */ ,
-        uc: e.settings.uc,
+ */ function Ua(t, e, n) {
+    return new Ma({
+        Vu: 3 /* Argument */ ,
+        $u: e.settings.$u,
         methodName: t._methodName,
-        ec: n
-    }, e.databaseId, e.M, e.ignoreUndefinedProperties);
+        Cu: n
+    }, e.databaseId, e.O, e.ignoreUndefinedProperties);
 }
 
-class rh extends Wc {
+class qa extends Da {
     _toFieldTransform(t) {
-        return new wn(t.path, new un);
+        return new Ze(t.path, new je);
     }
     isEqual(t) {
-        return t instanceof rh;
+        return t instanceof qa;
     }
 }
 
-class oh extends Wc {
+class Ka extends Da {
     constructor(t, e) {
-        super(t), this.cc = e;
+        super(t), this.Bu = e;
     }
     _toFieldTransform(t) {
-        const e = ih(this, t, 
-        /*array=*/ !0), n = this.cc.map((t => fh(t, e))), s = new an(n);
-        return new wn(t.path, s);
+        const e = Ua(this, t, 
+        /*array=*/ !0), n = this.Bu.map((t => Ha(t, e))), s = new Qe(n);
+        return new Ze(t.path, s);
     }
     isEqual(t) {
         // TODO(mrschmidt): Implement isEquals
@@ -20716,14 +20311,14 @@ class oh extends Wc {
     }
 }
 
-class uh extends Wc {
+class Ga extends Da {
     constructor(t, e) {
-        super(t), this.cc = e;
+        super(t), this.Bu = e;
     }
     _toFieldTransform(t) {
-        const e = ih(this, t, 
-        /*array=*/ !0), n = this.cc.map((t => fh(t, e))), s = new hn(n);
-        return new wn(t.path, s);
+        const e = Ua(this, t, 
+        /*array=*/ !0), n = this.Bu.map((t => Ha(t, e))), s = new ze(n);
+        return new Ze(t.path, s);
     }
     isEqual(t) {
         // TODO(mrschmidt): Implement isEquals
@@ -20731,13 +20326,13 @@ class uh extends Wc {
     }
 }
 
-class ah extends Wc {
+class ja extends Da {
     constructor(t, e) {
-        super(t), this.hc = e;
+        super(t), this.Lu = e;
     }
     _toFieldTransform(t) {
-        const e = new fn(t.M, en(t.M, this.hc));
-        return new wn(t.path, e);
+        const e = new Je(t.O, Le(t.O, this.Lu));
+        return new Ze(t.path, e);
     }
     isEqual(t) {
         // TODO(mrschmidt): Implement isEquals
@@ -20745,50 +20340,50 @@ class ah extends Wc {
     }
 }
 
-/** Parse update data from an update() call. */ function ch(t, e, n, s) {
-    const i = t.ac(1 /* Update */ , e, n);
-    wh("Data must be an object, but it was:", i, s);
-    const r = [], o = te.empty();
+/** Parse update data from an update() call. */ function Qa(t, e, n, s) {
+    const i = t.Fu(1 /* Update */ , e, n);
+    Xa("Data must be an object, but it was:", i, s);
+    const r = [], o = zt.empty();
     lt(s, ((t, s) => {
-        const u = yh(e, t, n);
+        const c = eh(e, t, n);
         // For Compat types, we have to "extract" the underlying types before
         // performing validation.
                 s = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(s);
-        const a = i.sc(u);
-        if (s instanceof sh) 
+        const u = i.xu(c);
+        if (s instanceof La) 
         // Add it to the field mask, but don't add anything to updateData.
-        r.push(u); else {
-            const t = fh(s, a);
-            null != t && (r.push(u), o.set(u, t));
+        r.push(c); else {
+            const t = Ha(s, u);
+            null != t && (r.push(c), o.set(c, t));
         }
     }));
-    const u = new gt(r);
-    return new Yc(o, u, i.fieldTransforms);
+    const c = new gt(r);
+    return new ka(o, c, i.fieldTransforms);
 }
 
-/** Parse update data from a list of field/value arguments. */ function hh(t, e, n, s, i, r) {
-    const o = t.ac(1 /* Update */ , e, n), u = [ mh(e, s, n) ], a = [ i ];
-    if (r.length % 2 != 0) throw new Q(G.INVALID_ARGUMENT, `Function ${e}() needs to be called with an even number of arguments that alternate between field names and values.`);
-    for (let t = 0; t < r.length; t += 2) u.push(mh(e, r[t])), a.push(r[t + 1]);
-    const c = [], h = te.empty();
+/** Parse update data from a list of field/value arguments. */ function Wa(t, e, n, s, i, r) {
+    const o = t.Fu(1 /* Update */ , e, n), c = [ Za(e, s, n) ], u = [ i ];
+    if (r.length % 2 != 0) throw new j(G.INVALID_ARGUMENT, `Function ${e}() needs to be called with an even number of arguments that alternate between field names and values.`);
+    for (let t = 0; t < r.length; t += 2) c.push(Za(e, r[t])), u.push(r[t + 1]);
+    const a = [], h = zt.empty();
     // We iterate in reverse order to pick the last value for a field if the
     // user specified the field multiple times.
-    for (let t = u.length - 1; t >= 0; --t) if (!Ih(c, u[t])) {
-        const e = u[t];
-        let n = a[t];
+    for (let t = c.length - 1; t >= 0; --t) if (!sh(a, c[t])) {
+        const e = c[t];
+        let n = u[t];
         // For Compat types, we have to "extract" the underlying types before
         // performing validation.
                 n = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(n);
-        const s = o.sc(e);
-        if (n instanceof sh) 
+        const s = o.xu(e);
+        if (n instanceof La) 
         // Add it to the field mask, but don't add anything to updateData.
-        c.push(e); else {
-            const t = fh(n, s);
-            null != t && (c.push(e), h.set(e, t));
+        a.push(e); else {
+            const t = Ha(n, s);
+            null != t && (a.push(e), h.set(e, t));
         }
     }
-    const l = new gt(c);
-    return new Yc(h, l, o.fieldTransforms);
+    const l = new gt(a);
+    return new ka(h, l, o.fieldTransforms);
 }
 
 /**
@@ -20797,8 +20392,8 @@ class ah extends Wc {
  *
  * @param allowArrays - Whether the query value is an array that may directly
  * contain additional arrays (e.g. the operand of an `in` query).
- */ function lh(t, e, n, s = !1) {
-    return fh(n, t.ac(s ? 4 /* ArrayArgument */ : 3 /* Argument */ , e));
+ */ function za(t, e, n, s = !1) {
+    return Ha(n, t.Fu(s ? 4 /* ArrayArgument */ : 3 /* Argument */ , e));
 }
 
 /**
@@ -20809,12 +20404,12 @@ class ah extends Wc {
  * the source of the data being parsed, etc.
  * @returns The parsed value, or null if the value was a FieldValue sentinel
  * that should not be included in the resulting parsed data.
- */ function fh(t, e) {
-    if (_h(
+ */ function Ha(t, e) {
+    if (Ya(
     // Unwrap the API type from the Compat SDK. This will return the API type
     // from firestore-exp.
-    t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t))) return wh("Unsupported field value:", e, t), dh(t, e);
-    if (t instanceof Wc) 
+    t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t))) return Xa("Unsupported field value:", e, t), Ja(t, e);
+    if (t instanceof Da) 
     // FieldValues usually parse into transforms (except deleteField())
     // in which case we do not want to include this field in our parsed data
     // (as doing so will overwrite the field directly prior to the transform
@@ -20826,8 +20421,8 @@ class ah extends Wc {
  */
     return function(t, e) {
         // Sentinels are only supported with writes, and not within arrays.
-        if (!Xc(e.Xa)) throw e.rc(`${t._methodName}() can only be used with update() and set()`);
-        if (!e.path) throw e.rc(`${t._methodName}() is not currently supported inside arrays`);
+        if (!Oa(e.Vu)) throw e.Ou(`${t._methodName}() can only be used with update() and set()`);
+        if (!e.path) throw e.Ou(`${t._methodName}() is not currently supported inside arrays`);
         const n = t._toFieldTransform(e);
         n && e.fieldTransforms.push(n);
     }
@@ -20851,12 +20446,12 @@ class ah extends Wc {
         // the set of values to be included for the IN query) that may directly
         // contain additional arrays (each representing an individual field
         // value), so we disable this validation.
-        if (e.settings.ec && 4 /* ArrayArgument */ !== e.Xa) throw e.rc("Nested arrays are not supported");
+        if (e.settings.Cu && 4 /* ArrayArgument */ !== e.Vu) throw e.Ou("Nested arrays are not supported");
         return function(t, e) {
             const n = [];
             let s = 0;
             for (const i of t) {
-                let t = fh(i, e.ic(s));
+                let t = Ha(i, e.ku(s));
                 null == t && (
                 // Just include nulls in the array for fields being replaced with a
                 // sentinel.
@@ -20875,7 +20470,7 @@ class ah extends Wc {
         if (null === (t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t))) return {
             nullValue: "NULL_VALUE"
         };
-        if ("number" == typeof t) return en(e.M, t);
+        if ("number" == typeof t) return Le(e.O, t);
         if ("boolean" == typeof t) return {
             booleanValue: t
         };
@@ -20883,37 +20478,37 @@ class ah extends Wc {
             stringValue: t
         };
         if (t instanceof Date) {
-            const n = at.fromDate(t);
+            const n = ut.fromDate(t);
             return {
-                timestampValue: ds(e.M, n)
+                timestampValue: Jn(e.O, n)
             };
         }
-        if (t instanceof at) {
+        if (t instanceof ut) {
             // Firestore backend truncates precision down to microseconds. To ensure
             // offline mode works the same with regards to truncation, perform the
             // truncation immediately without waiting for the backend to do that.
-            const n = new at(t.seconds, 1e3 * Math.floor(t.nanoseconds / 1e3));
+            const n = new ut(t.seconds, 1e3 * Math.floor(t.nanoseconds / 1e3));
             return {
-                timestampValue: ds(e.M, n)
+                timestampValue: Jn(e.O, n)
             };
         }
-        if (t instanceof zc) return {
+        if (t instanceof Ca) return {
             geoPointValue: {
                 latitude: t.latitude,
                 longitude: t.longitude
             }
         };
-        if (t instanceof jc) return {
-            bytesValue: _s(e.M, t._byteString)
+        if (t instanceof Sa) return {
+            bytesValue: Yn(e.O, t._byteString)
         };
-        if (t instanceof mc) {
+        if (t instanceof Zu) {
             const n = e.databaseId, s = t.firestore._databaseId;
-            if (!s.isEqual(n)) throw e.rc(`Document reference is for database ${s.projectId}/${s.database} but should be for database ${n.projectId}/${n.database}`);
+            if (!s.isEqual(n)) throw e.Ou(`Document reference is for database ${s.projectId}/${s.database} but should be for database ${n.projectId}/${n.database}`);
             return {
-                referenceValue: gs(t.firestore._databaseId || e.databaseId, t._key.path)
+                referenceValue: ts(t.firestore._databaseId || e.databaseId, t._key.path)
             };
         }
-        throw e.rc(`Unsupported field value: ${hc(t)}`);
+        throw e.Ou(`Unsupported field value: ${Wu(t)}`);
     }
     /**
  * Checks whether an object looks like a JSON object that should be converted
@@ -20924,13 +20519,13 @@ class ah extends Wc {
  */ (t, e);
 }
 
-function dh(t, e) {
+function Ja(t, e) {
     const n = {};
     return ft(t) ? 
     // If we encounter an empty object, we explicitly add it to the update
     // mask to ensure that the server creates a map entry.
     e.path && e.path.length > 0 && e.fieldMask.push(e.path) : lt(t, ((t, s) => {
-        const i = fh(s, e.tc(t));
+        const i = Ha(s, e.Du(t));
         null != i && (n[t] = i);
     })), {
         mapValue: {
@@ -20939,35 +20534,35 @@ function dh(t, e) {
     };
 }
 
-function _h(t) {
-    return !("object" != typeof t || null === t || t instanceof Array || t instanceof Date || t instanceof at || t instanceof zc || t instanceof jc || t instanceof mc || t instanceof Wc);
+function Ya(t) {
+    return !("object" != typeof t || null === t || t instanceof Array || t instanceof Date || t instanceof ut || t instanceof Ca || t instanceof Sa || t instanceof Zu || t instanceof Da);
 }
 
-function wh(t, e, n) {
-    if (!_h(n) || !function(t) {
+function Xa(t, e, n) {
+    if (!Ya(n) || !function(t) {
         return "object" == typeof t && null !== t && (Object.getPrototypeOf(t) === Object.prototype || null === Object.getPrototypeOf(t));
     }(n)) {
-        const s = hc(n);
-        throw "an object" === s ? e.rc(t + " a custom object") : e.rc(t + " " + s);
+        const s = Wu(n);
+        throw "an object" === s ? e.Ou(t + " a custom object") : e.Ou(t + " " + s);
     }
 }
 
 /**
  * Helper that calls fromDotSeparatedString() but wraps any error thrown.
- */ function mh(t, e, n) {
+ */ function Za(t, e, n) {
     if ((
     // If required, replace the FieldPath Compat class with with the firestore-exp
     // FieldPath.
-    e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) instanceof Gc) return e._internalPath;
-    if ("string" == typeof e) return yh(t, e);
-    throw ph("Field path arguments must be of type string or ", t, 
+    e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) instanceof va) return e._internalPath;
+    if ("string" == typeof e) return eh(t, e);
+    throw nh("Field path arguments must be of type string or ", t, 
     /* hasConverter= */ !1, 
     /* path= */ void 0, n);
 }
 
 /**
  * Matches any characters in a field path string that are reserved.
- */ const gh = new RegExp("[~\\*/\\[\\]]");
+ */ const th = new RegExp("[~\\*/\\[\\]]");
 
 /**
  * Wraps fromDotSeparatedString with an error message about the method that
@@ -20977,29 +20572,29 @@ function wh(t, e, n) {
  * split on dots.
  * @param targetDoc - The document against which the field path will be
  * evaluated.
- */ function yh(t, e, n) {
-    if (e.search(gh) >= 0) throw ph(`Invalid field path (${e}). Paths must not contain '~', '*', '/', '[', or ']'`, t, 
+ */ function eh(t, e, n) {
+    if (e.search(th) >= 0) throw nh(`Invalid field path (${e}). Paths must not contain '~', '*', '/', '[', or ']'`, t, 
     /* hasConverter= */ !1, 
     /* path= */ void 0, n);
     try {
-        return new Gc(...e.split("."))._internalPath;
+        return new va(...e.split("."))._internalPath;
     } catch (s) {
-        throw ph(`Invalid field path (${e}). Paths must not be empty, begin with '.', end with '.', or contain '..'`, t, 
+        throw nh(`Invalid field path (${e}). Paths must not be empty, begin with '.', end with '.', or contain '..'`, t, 
         /* hasConverter= */ !1, 
         /* path= */ void 0, n);
     }
 }
 
-function ph(t, e, n, s, i) {
+function nh(t, e, n, s, i) {
     const r = s && !s.isEmpty(), o = void 0 !== i;
-    let u = `Function ${e}() called with invalid data`;
-    n && (u += " (via `toFirestore()`)"), u += ". ";
-    let a = "";
-    return (r || o) && (a += " (found", r && (a += ` in field ${s}`), o && (a += ` in document ${i}`), 
-    a += ")"), new Q(G.INVALID_ARGUMENT, u + t + a);
+    let c = `Function ${e}() called with invalid data`;
+    n && (c += " (via `toFirestore()`)"), c += ". ";
+    let u = "";
+    return (r || o) && (u += " (found", r && (u += ` in field ${s}`), o && (u += ` in document ${i}`), 
+    u += ")"), new j(G.INVALID_ARGUMENT, c + t + u);
 }
 
-/** Checks `haystack` if FieldPath `needle` is present. Runs in O(n). */ function Ih(t, e) {
+/** Checks `haystack` if FieldPath `needle` is present. Runs in O(n). */ function sh(t, e) {
     return t.some((t => t.isEqual(e)));
 }
 
@@ -21027,7 +20622,7 @@ function ph(t, e, n, s, i) {
  * For a `DocumentSnapshot` that points to a non-existing document, any data
  * access will return 'undefined'. You can use the `exists()` method to
  * explicitly verify a document's existence.
- */ class Th {
+ */ class ih {
     // Note: This class is stripped down version of the DocumentSnapshot in
     // the legacy SDK. The changes are:
     // - No support for SnapshotMetadata.
@@ -21043,7 +20638,7 @@ function ph(t, e, n, s, i) {
     /**
      * The `DocumentReference` for the document included in the `DocumentSnapshot`.
      */    get ref() {
-        return new mc(this._firestore, this._converter, this._key);
+        return new Zu(this._firestore, this._converter, this._key);
     }
     /**
      * Signals whether or not the document at the snapshot's location exists.
@@ -21063,7 +20658,7 @@ function ph(t, e, n, s, i) {
             if (this._converter) {
                 // We only want to use the converter and create a new DocumentSnapshot
                 // if a converter has been provided.
-                const t = new Eh(this._firestore, this._userDataWriter, this._key, this._document, 
+                const t = new rh(this._firestore, this._userDataWriter, this._key, this._document, 
                 /* converter= */ null);
                 return this._converter.fromFirestore(t);
             }
@@ -21083,7 +20678,7 @@ function ph(t, e, n, s, i) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     get(t) {
         if (this._document) {
-            const e = this._document.data.field(Ah("DocumentSnapshot.get", t));
+            const e = this._document.data.field(oh("DocumentSnapshot.get", t));
             if (null !== e) return this._userDataWriter.convertValue(e);
         }
     }
@@ -21099,7 +20694,7 @@ function ph(t, e, n, s, i) {
  * `DocumentSnapshot`. Since query results contain only existing documents, the
  * `exists` property will always be true and `data()` will never return
  * 'undefined'.
- */ class Eh extends Th {
+ */ class rh extends ih {
     /**
      * Retrieves all fields in the document as an `Object`.
      *
@@ -21113,8 +20708,8 @@ function ph(t, e, n, s, i) {
 
 /**
  * Helper that calls `fromDotSeparatedString()` but wraps any error thrown.
- */ function Ah(t, e) {
-    return "string" == typeof e ? yh(t, e) : e instanceof Gc ? e._internalPath : e._delegate._internalPath;
+ */ function oh(t, e) {
+    return "string" == typeof e ? eh(t, e) : e instanceof va ? e._internalPath : e._delegate._internalPath;
 }
 
 /**
@@ -21135,7 +20730,7 @@ function ph(t, e, n, s, i) {
  */
 /**
  * Metadata about a snapshot, describing the state of the snapshot.
- */ class Rh {
+ */ class ch {
     /** @hideconstructor */
     constructor(t, e) {
         this.hasPendingWrites = t, this.fromCache = e;
@@ -21158,7 +20753,7 @@ function ph(t, e, n, s, i) {
  * For a `DocumentSnapshot` that points to a non-existing document, any data
  * access will return 'undefined'. You can use the `exists()` method to
  * explicitly verify a document's existence.
- */ class Ph extends Th {
+ */ class uh extends ih {
     /** @hideconstructor protected */
     constructor(t, e, n, s, i, r) {
         super(t, e, n, s, r), this._firestore = t, this._firestoreImpl = t, this.metadata = i;
@@ -21186,7 +20781,7 @@ function ph(t, e, n, s, i) {
             if (this._converter) {
                 // We only want to use the converter and create a new DocumentSnapshot
                 // if a converter has been provided.
-                const e = new bh(this._firestore, this._userDataWriter, this._key, this._document, this.metadata, 
+                const e = new ah(this._firestore, this._userDataWriter, this._key, this._document, this.metadata, 
                 /* converter= */ null);
                 return this._converter.fromFirestore(e, t);
             }
@@ -21213,7 +20808,7 @@ function ph(t, e, n, s, i) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     get(t, e = {}) {
         if (this._document) {
-            const n = this._document.data.field(Ah("DocumentSnapshot.get", t));
+            const n = this._document.data.field(oh("DocumentSnapshot.get", t));
             if (null !== n) return this._userDataWriter.convertValue(n, e.serverTimestamps);
         }
     }
@@ -21229,7 +20824,7 @@ function ph(t, e, n, s, i) {
  * `DocumentSnapshot`. Since query results contain only existing documents, the
  * `exists` property will always be true and `data()` will never return
  * 'undefined'.
- */ class bh extends Ph {
+ */ class ah extends uh {
     /**
      * Retrieves all fields in the document as an `Object`.
      *
@@ -21254,10 +20849,10 @@ function ph(t, e, n, s, i) {
  * array via the `docs` property or enumerated using the `forEach` method. The
  * number of documents can be determined via the `empty` and `size`
  * properties.
- */ class Vh {
+ */ class hh {
     /** @hideconstructor */
     constructor(t, e, n, s) {
-        this._firestore = t, this._userDataWriter = e, this._snapshot = s, this.metadata = new Rh(s.hasPendingWrites, s.fromCache), 
+        this._firestore = t, this._userDataWriter = e, this._snapshot = s, this.metadata = new ch(s.hasPendingWrites, s.fromCache), 
         this.query = n;
     }
     /** An array of all the documents in the `QuerySnapshot`. */    get docs() {
@@ -21278,7 +20873,7 @@ function ph(t, e, n, s, i) {
      * @param thisArg - The `this` binding for the callback.
      */    forEach(t, e) {
         this._snapshot.docs.forEach((n => {
-            t.call(e, new bh(this._firestore, this._userDataWriter, n.key, n, new Rh(this._snapshot.mutatedKeys.has(n.key), this._snapshot.fromCache), this.query.converter));
+            t.call(e, new ah(this._firestore, this._userDataWriter, n.key, n, new ch(this._snapshot.mutatedKeys.has(n.key), this._snapshot.fromCache), this.query.converter));
         }));
     }
     /**
@@ -21291,7 +20886,7 @@ function ph(t, e, n, s, i) {
      * snapshot events.
      */    docChanges(t = {}) {
         const e = !!t.includeMetadataChanges;
-        if (e && this._snapshot.excludesMetadataChanges) throw new Q(G.INVALID_ARGUMENT, "To include metadata changes with your document changes, you must also pass { includeMetadataChanges:true } to onSnapshot().");
+        if (e && this._snapshot.excludesMetadataChanges) throw new j(G.INVALID_ARGUMENT, "To include metadata changes with your document changes, you must also pass { includeMetadataChanges:true } to onSnapshot().");
         return this._cachedChanges && this._cachedChangesIncludeMetadataChanges === e || (this._cachedChanges = 
         /** Calculates the array of `DocumentChange`s for a given `ViewSnapshot`. */
         function(t, e) {
@@ -21299,7 +20894,7 @@ function ph(t, e, n, s, i) {
                 let e = 0;
                 return t._snapshot.docChanges.map((n => ({
                     type: "added",
-                    doc: new bh(t._firestore, t._userDataWriter, n.doc.key, n.doc, new Rh(t._snapshot.mutatedKeys.has(n.doc.key), t._snapshot.fromCache), t.query.converter),
+                    doc: new ah(t._firestore, t._userDataWriter, n.doc.key, n.doc, new ch(t._snapshot.mutatedKeys.has(n.doc.key), t._snapshot.fromCache), t.query.converter),
                     oldIndex: -1,
                     newIndex: e++
                 })));
@@ -21309,11 +20904,11 @@ function ph(t, e, n, s, i) {
                 // to lookup the index of a document.
                 let n = t._snapshot.oldDocs;
                 return t._snapshot.docChanges.filter((t => e || 3 /* Metadata */ !== t.type)).map((e => {
-                    const s = new bh(t._firestore, t._userDataWriter, e.doc.key, e.doc, new Rh(t._snapshot.mutatedKeys.has(e.doc.key), t._snapshot.fromCache), t.query.converter);
+                    const s = new ah(t._firestore, t._userDataWriter, e.doc.key, e.doc, new ch(t._snapshot.mutatedKeys.has(e.doc.key), t._snapshot.fromCache), t.query.converter);
                     let i = -1, r = -1;
                     return 0 /* Added */ !== e.type && (i = n.indexOf(e.doc.key), n = n.delete(e.doc.key)), 
                     1 /* Removed */ !== e.type && (n = n.add(e.doc), r = n.indexOf(e.doc.key)), {
-                        type: vh(e.type),
+                        type: lh(e.type),
                         doc: s,
                         oldIndex: i,
                         newIndex: r
@@ -21324,7 +20919,7 @@ function ph(t, e, n, s, i) {
     }
 }
 
-function vh(t) {
+function lh(t) {
     switch (t) {
       case 0 /* Added */ :
         return "added";
@@ -21349,8 +20944,8 @@ function vh(t) {
  * @param left - A snapshot to compare.
  * @param right - A snapshot to compare.
  * @returns true if the snapshots are equal.
- */ function Sh(t, e) {
-    return t instanceof Ph && e instanceof Ph ? t._firestore === e._firestore && t._key.isEqual(e._key) && (null === t._document ? null === e._document : t._document.isEqual(e._document)) && t._converter === e._converter : t instanceof Vh && e instanceof Vh && (t._firestore === e._firestore && Ac(t.query, e.query) && t.metadata.isEqual(e.metadata) && t._snapshot.isEqual(e._snapshot));
+ */ function fh(t, e) {
+    return t instanceof uh && e instanceof uh ? t._firestore === e._firestore && t._key.isEqual(e._key) && (null === t._document ? null === e._document : t._document.isEqual(e._document)) && t._converter === e._converter : t instanceof hh && e instanceof hh && (t._firestore === e._firestore && oa(t.query, e.query) && t.metadata.isEqual(e.metadata) && t._snapshot.isEqual(e._snapshot));
 }
 
 /**
@@ -21368,8 +20963,8 @@ function vh(t) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ function Dh(t) {
-    if (Be(t) && 0 === t.explicitOrderBy.length) throw new Q(G.UNIMPLEMENTED, "limitToLast() queries require specifying at least one orderBy() clause");
+ */ function dh(t) {
+    if (Pe(t) && 0 === t.explicitOrderBy.length) throw new j(G.UNIMPLEMENTED, "limitToLast() queries require specifying at least one orderBy() clause");
 }
 
 /**
@@ -21379,7 +20974,7 @@ function vh(t) {
  * endBefore:1}, {@link (endAt:1)}, {@link limit} or {@link limitToLast} and
  * can then be passed to {@link query} to create a new query instance that
  * also contains this `QueryConstraint`.
- */ class Ch {}
+ */ class _h {}
 
 /**
  * Creates a new immutable instance of {@link Query} that is extended to also include
@@ -21389,40 +20984,40 @@ function vh(t) {
  * @param queryConstraints - The list of {@link QueryConstraint}s to apply.
  * @throws if any of the provided query constraints cannot be combined with the
  * existing or new constraints.
- */ function xh(t, ...e) {
+ */ function wh(t, ...e) {
     for (const n of e) t = n._apply(t);
     return t;
 }
 
-class Nh extends Ch {
+class mh extends _h {
     constructor(t, e, n) {
-        super(), this.lc = t, this.fc = e, this.dc = n, this.type = "where";
+        super(), this.Uu = t, this.qu = e, this.Ku = n, this.type = "where";
     }
     _apply(t) {
-        const e = eh(t.firestore), n = function(t, e, n, s, i, r, o) {
-            let u;
+        const e = Fa(t.firestore), n = function(t, e, n, s, i, r, o) {
+            let c;
             if (i.isKeyField()) {
-                if ("array-contains" /* ARRAY_CONTAINS */ === r || "array-contains-any" /* ARRAY_CONTAINS_ANY */ === r) throw new Q(G.INVALID_ARGUMENT, `Invalid Query. You can't perform '${r}' queries on documentId().`);
+                if ("array-contains" /* ARRAY_CONTAINS */ === r || "array-contains-any" /* ARRAY_CONTAINS_ANY */ === r) throw new j(G.INVALID_ARGUMENT, `Invalid Query. You can't perform '${r}' queries on documentId().`);
                 if ("in" /* IN */ === r || "not-in" /* NOT_IN */ === r) {
-                    zh(o, r);
+                    Ch(o, r);
                     const e = [];
-                    for (const n of o) e.push(Wh(s, t, n));
-                    u = {
+                    for (const n of o) e.push(Dh(s, t, n));
+                    c = {
                         arrayValue: {
                             values: e
                         }
                     };
-                } else u = Wh(s, t, o);
-            } else "in" /* IN */ !== r && "not-in" /* NOT_IN */ !== r && "array-contains-any" /* ARRAY_CONTAINS_ANY */ !== r || zh(o, r), 
-            u = lh(n, e, o, 
+                } else c = Dh(s, t, o);
+            } else "in" /* IN */ !== r && "not-in" /* NOT_IN */ !== r && "array-contains-any" /* ARRAY_CONTAINS_ANY */ !== r || Ch(o, r), 
+            c = za(n, e, o, 
             /* allowArrays= */ "in" /* IN */ === r || "not-in" /* NOT_IN */ === r);
-            const a = Te.create(i, r, u);
+            const u = ce.create(i, r, c);
             return function(t, e) {
                 if (e.S()) {
-                    const n = Ue(t);
-                    if (null !== n && !n.isEqual(e.field)) throw new Q(G.INVALID_ARGUMENT, `Invalid query. All where filters with an inequality (<, <=, !=, not-in, >, or >=) must be on the same field. But you have inequality filters on '${n.toString()}' and '${e.field.toString()}'`);
-                    const s = Le(t);
-                    null !== s && Hh(t, e.field, s);
+                    const n = ve(t);
+                    if (null !== n && !n.isEqual(e.field)) throw new j(G.INVALID_ARGUMENT, `Invalid query. All where filters with an inequality (<, <=, !=, not-in, >, or >=) must be on the same field. But you have inequality filters on '${n.toString()}' and '${e.field.toString()}'`);
+                    const s = be(t);
+                    null !== s && Nh(t, e.field, s);
                 }
                 const n = function(t, e) {
                     for (const n of t.filters) if (e.indexOf(n.op) >= 0) return n.op;
@@ -21463,12 +21058,12 @@ class Nh extends Ch {
                 }(e.op));
                 if (null !== n) 
                 // Special case when it's a duplicate op to give a slightly clearer error message.
-                throw n === e.op ? new Q(G.INVALID_ARGUMENT, `Invalid query. You cannot use more than one '${e.op.toString()}' filter.`) : new Q(G.INVALID_ARGUMENT, `Invalid query. You cannot use '${e.op.toString()}' filters with '${n.toString()}' filters.`);
-            }(t, a), a;
-        }(t._query, "where", e, t.firestore._databaseId, this.lc, this.fc, this.dc);
-        return new gc(t.firestore, t.converter, function(t, e) {
+                throw n === e.op ? new j(G.INVALID_ARGUMENT, `Invalid query. You cannot use more than one '${e.op.toString()}' filter.`) : new j(G.INVALID_ARGUMENT, `Invalid query. You cannot use '${e.op.toString()}' filters with '${n.toString()}' filters.`);
+            }(t, u), u;
+        }(t._query, "where", e, t.firestore._databaseId, this.Uu, this.qu, this.Ku);
+        return new ta(t.firestore, t.converter, function(t, e) {
             const n = t.filters.concat([ e ]);
-            return new Me(t.path, t.collectionGroup, t.explicitOrderBy.slice(), n, t.limit, t.limitType, t.startAt, t.endAt);
+            return new Ee(t.path, t.collectionGroup, t.explicitOrderBy.slice(), n, t.limit, t.limitType, t.startAt, t.endAt);
         }(t._query, n));
     }
 }
@@ -21483,25 +21078,25 @@ class Nh extends Ch {
  *   "&lt;=", "!=").
  * @param value - The value for comparison
  * @returns The created {@link Query}.
- */ function kh(t, e, n) {
-    const s = e, i = Ah("where", t);
-    return new Nh(i, s, n);
+ */ function gh(t, e, n) {
+    const s = e, i = oh("where", t);
+    return new mh(i, s, n);
 }
 
-class Mh extends Ch {
+class yh extends _h {
     constructor(t, e) {
-        super(), this.lc = t, this._c = e, this.type = "orderBy";
+        super(), this.Uu = t, this.Gu = e, this.type = "orderBy";
     }
     _apply(t) {
         const e = function(t, e, n) {
-            if (null !== t.startAt) throw new Q(G.INVALID_ARGUMENT, "Invalid query. You must not call startAt() or startAfter() before calling orderBy().");
-            if (null !== t.endAt) throw new Q(G.INVALID_ARGUMENT, "Invalid query. You must not call endAt() or endBefore() before calling orderBy().");
-            const s = new Ce(e, n);
+            if (null !== t.startAt) throw new j(G.INVALID_ARGUMENT, "Invalid query. You must not call startAt() or startAfter() before calling orderBy().");
+            if (null !== t.endAt) throw new j(G.INVALID_ARGUMENT, "Invalid query. You must not call endAt() or endBefore() before calling orderBy().");
+            const s = new ge(e, n);
             return function(t, e) {
-                if (null === Le(t)) {
+                if (null === be(t)) {
                     // This is the first order by. It must match any inequality.
-                    const n = Ue(t);
-                    null !== n && Hh(t, n, e.field);
+                    const n = ve(t);
+                    null !== n && Nh(t, n, e.field);
                 }
             }(t, s), s;
         }
@@ -21515,11 +21110,11 @@ class Mh extends Ch {
  * Will throw if the document does not contain all fields of the order by
  * of the query or if any of the fields in the order by are an uncommitted
  * server timestamp.
- */ (t._query, this.lc, this._c);
-        return new gc(t.firestore, t.converter, function(t, e) {
+ */ (t._query, this.Uu, this.Gu);
+        return new ta(t.firestore, t.converter, function(t, e) {
             // TODO(dimond): validate that orderBy does not list the same key twice.
             const n = t.explicitOrderBy.concat([ e ]);
-            return new Me(t.path, t.collectionGroup, n, t.filters.slice(), t.limit, t.limitType, t.startAt, t.endAt);
+            return new Ee(t.path, t.collectionGroup, n, t.filters.slice(), t.limit, t.limitType, t.startAt, t.endAt);
         }(t._query, e));
     }
 }
@@ -21532,17 +21127,17 @@ class Mh extends Ch {
  * @param directionStr - Optional direction to sort by ('asc' or 'desc'). If
  * not specified, order will be ascending.
  * @returns The created {@link Query}.
- */ function Oh(t, e = "asc") {
-    const n = e, s = Ah("orderBy", t);
-    return new Mh(s, n);
+ */ function ph(t, e = "asc") {
+    const n = e, s = oh("orderBy", t);
+    return new yh(s, n);
 }
 
-class Fh extends Ch {
+class Ih extends _h {
     constructor(t, e, n) {
-        super(), this.type = t, this.wc = e, this.mc = n;
+        super(), this.type = t, this.ju = e, this.Qu = n;
     }
     _apply(t) {
-        return new gc(t.firestore, t.converter, Qe(t._query, this.wc, this.mc));
+        return new ta(t.firestore, t.converter, Ce(t._query, this.ju, this.Qu));
     }
 }
 
@@ -21551,8 +21146,8 @@ class Fh extends Ch {
  *
  * @param limit - The maximum number of items to return.
  * @returns The created {@link Query}.
- */ function $h(t) {
-    return fc("limit", t), new Fh("limit", t, "F" /* First */);
+ */ function Eh(t) {
+    return Hu("limit", t), new Ih("limit", t, "F" /* First */);
 }
 
 /**
@@ -21563,56 +21158,56 @@ class Fh extends Ch {
  *
  * @param limit - The maximum number of items to return.
  * @returns The created {@link Query}.
- */ function Bh(t) {
-    return fc("limitToLast", t), new Fh("limitToLast", t, "L" /* Last */);
+ */ function Th(t) {
+    return Hu("limitToLast", t), new Ih("limitToLast", t, "L" /* Last */);
 }
 
-class Lh extends Ch {
+class Ah extends _h {
     constructor(t, e, n) {
-        super(), this.type = t, this.gc = e, this.yc = n;
+        super(), this.type = t, this.Wu = e, this.zu = n;
     }
     _apply(t) {
-        const e = jh(t, this.type, this.gc, this.yc);
-        return new gc(t.firestore, t.converter, function(t, e) {
-            return new Me(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), t.limit, t.limitType, e, t.endAt);
+        const e = Sh(t, this.type, this.Wu, this.zu);
+        return new ta(t.firestore, t.converter, function(t, e) {
+            return new Ee(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), t.limit, t.limitType, e, t.endAt);
         }(t._query, e));
     }
 }
 
-function Uh(...t) {
-    return new Lh("startAt", t, 
+function Rh(...t) {
+    return new Ah("startAt", t, 
     /*inclusive=*/ !0);
 }
 
-function qh(...t) {
-    return new Lh("startAfter", t, 
+function Ph(...t) {
+    return new Ah("startAfter", t, 
     /*inclusive=*/ !1);
 }
 
-class Kh extends Ch {
+class bh extends _h {
     constructor(t, e, n) {
-        super(), this.type = t, this.gc = e, this.yc = n;
+        super(), this.type = t, this.Wu = e, this.zu = n;
     }
     _apply(t) {
-        const e = jh(t, this.type, this.gc, this.yc);
-        return new gc(t.firestore, t.converter, function(t, e) {
-            return new Me(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), t.limit, t.limitType, t.startAt, e);
+        const e = Sh(t, this.type, this.Wu, this.zu);
+        return new ta(t.firestore, t.converter, function(t, e) {
+            return new Ee(t.path, t.collectionGroup, t.explicitOrderBy.slice(), t.filters.slice(), t.limit, t.limitType, t.startAt, e);
         }(t._query, e));
     }
 }
 
-function Gh(...t) {
-    return new Kh("endBefore", t, 
+function vh(...t) {
+    return new bh("endBefore", t, 
     /*inclusive=*/ !1);
 }
 
-function Qh(...t) {
-    return new Kh("endAt", t, /*inclusive=*/ !0);
+function Vh(...t) {
+    return new bh("endAt", t, /*inclusive=*/ !0);
 }
 
-/** Helper function to create a bound from a document or fields */ function jh(t, e, n, s) {
-    if (n[0] = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(n[0]), n[0] instanceof Th) return function(t, e, n, s, i) {
-        if (!s) throw new Q(G.NOT_FOUND, `Can't use a DocumentSnapshot that doesn't exist for ${n}().`);
+/** Helper function to create a bound from a document or fields */ function Sh(t, e, n, s) {
+    if (n[0] = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(n[0]), n[0] instanceof ih) return function(t, e, n, s, i) {
+        if (!s) throw new j(G.NOT_FOUND, `Can't use a DocumentSnapshot that doesn't exist for ${n}().`);
         const r = [];
         // Because people expect to continue/end a query at the exact document
         // provided, we need to use the implicit sort order rather than the explicit
@@ -21621,42 +21216,42 @@ function Qh(...t) {
         // the provided document. Without the key (by using the explicit sort
         // orders), multiple documents could match the position, yielding duplicate
         // results.
-                for (const n of Ke(t)) if (n.field.isKeyField()) r.push(qt(e, s.key)); else {
+                for (const n of Se(t)) if (n.field.isKeyField()) r.push(Ut(e, s.key)); else {
             const t = s.data.field(n.field);
-            if (Rt(t)) throw new Q(G.INVALID_ARGUMENT, 'Invalid query. You are trying to start or end a query using a document for which the field "' + n.field + '" is an uncommitted server timestamp. (Since the value of this field is unknown, you cannot start/end a query with it.)');
+            if (Rt(t)) throw new j(G.INVALID_ARGUMENT, 'Invalid query. You are trying to start or end a query using a document for which the field "' + n.field + '" is an uncommitted server timestamp. (Since the value of this field is unknown, you cannot start/end a query with it.)');
             if (null === t) {
                 const t = n.field.canonicalString();
-                throw new Q(G.INVALID_ARGUMENT, `Invalid query. You are trying to start or end a query using a document for which the field '${t}' (used as the orderBy) does not exist.`);
+                throw new j(G.INVALID_ARGUMENT, `Invalid query. You are trying to start or end a query using a document for which the field '${t}' (used as the orderBy) does not exist.`);
             }
             r.push(t);
         }
-        return new De(r, i);
+        return new me(r, i);
     }
     /**
  * Converts a list of field values to a `Bound` for the given query.
  */ (t._query, t.firestore._databaseId, e, n[0]._document, s);
     {
-        const i = eh(t.firestore);
+        const i = Fa(t.firestore);
         return function(t, e, n, s, i, r) {
             // Use explicit order by's because it has to match the query the user made
             const o = t.explicitOrderBy;
-            if (i.length > o.length) throw new Q(G.INVALID_ARGUMENT, `Too many arguments provided to ${s}(). The number of arguments must be less than or equal to the number of orderBy() clauses`);
-            const u = [];
+            if (i.length > o.length) throw new j(G.INVALID_ARGUMENT, `Too many arguments provided to ${s}(). The number of arguments must be less than or equal to the number of orderBy() clauses`);
+            const c = [];
             for (let r = 0; r < i.length; r++) {
-                const a = i[r];
+                const u = i[r];
                 if (o[r].field.isKeyField()) {
-                    if ("string" != typeof a) throw new Q(G.INVALID_ARGUMENT, `Invalid query. Expected a string for document ID in ${s}(), but got a ${typeof a}`);
-                    if (!qe(t) && -1 !== a.indexOf("/")) throw new Q(G.INVALID_ARGUMENT, `Invalid query. When querying a collection and ordering by documentId(), the value passed to ${s}() must be a plain document ID, but '${a}' contains a slash.`);
-                    const n = t.path.child(_t.fromString(a));
-                    if (!xt.isDocumentKey(n)) throw new Q(G.INVALID_ARGUMENT, `Invalid query. When querying a collection group and ordering by documentId(), the value passed to ${s}() must result in a valid document path, but '${n}' is not because it contains an odd number of segments.`);
-                    const i = new xt(n);
-                    u.push(qt(e, i));
+                    if ("string" != typeof u) throw new j(G.INVALID_ARGUMENT, `Invalid query. Expected a string for document ID in ${s}(), but got a ${typeof u}`);
+                    if (!Ve(t) && -1 !== u.indexOf("/")) throw new j(G.INVALID_ARGUMENT, `Invalid query. When querying a collection and ordering by documentId(), the value passed to ${s}() must be a plain document ID, but '${u}' contains a slash.`);
+                    const n = t.path.child(_t.fromString(u));
+                    if (!Nt.isDocumentKey(n)) throw new j(G.INVALID_ARGUMENT, `Invalid query. When querying a collection group and ordering by documentId(), the value passed to ${s}() must result in a valid document path, but '${n}' is not because it contains an odd number of segments.`);
+                    const i = new Nt(n);
+                    c.push(Ut(e, i));
                 } else {
-                    const t = lh(n, s, a);
-                    u.push(t);
+                    const t = za(n, s, u);
+                    c.push(t);
                 }
             }
-            return new De(u, r);
+            return new me(c, r);
         }
         /**
  * Parses the given `documentIdValue` into a `ReferenceValue`, throwing
@@ -21666,28 +21261,28 @@ function Qh(...t) {
     }
 }
 
-function Wh(t, e, n) {
+function Dh(t, e, n) {
     if ("string" == typeof (n = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(n))) {
-        if ("" === n) throw new Q(G.INVALID_ARGUMENT, "Invalid query. When querying with documentId(), you must provide a valid document ID, but it was an empty string.");
-        if (!qe(e) && -1 !== n.indexOf("/")) throw new Q(G.INVALID_ARGUMENT, `Invalid query. When querying a collection by documentId(), you must provide a plain document ID, but '${n}' contains a '/' character.`);
+        if ("" === n) throw new j(G.INVALID_ARGUMENT, "Invalid query. When querying with documentId(), you must provide a valid document ID, but it was an empty string.");
+        if (!Ve(e) && -1 !== n.indexOf("/")) throw new j(G.INVALID_ARGUMENT, `Invalid query. When querying a collection by documentId(), you must provide a plain document ID, but '${n}' contains a '/' character.`);
         const s = e.path.child(_t.fromString(n));
-        if (!xt.isDocumentKey(s)) throw new Q(G.INVALID_ARGUMENT, `Invalid query. When querying a collection group by documentId(), the value provided must result in a valid document path, but '${s}' is not because it has an odd number of segments (${s.length}).`);
-        return qt(t, new xt(s));
+        if (!Nt.isDocumentKey(s)) throw new j(G.INVALID_ARGUMENT, `Invalid query. When querying a collection group by documentId(), the value provided must result in a valid document path, but '${s}' is not because it has an odd number of segments (${s.length}).`);
+        return Ut(t, new Nt(s));
     }
-    if (n instanceof mc) return qt(t, n._key);
-    throw new Q(G.INVALID_ARGUMENT, `Invalid query. When querying with documentId(), you must provide a valid string or a DocumentReference, but it was: ${hc(n)}.`);
+    if (n instanceof Zu) return Ut(t, n._key);
+    throw new j(G.INVALID_ARGUMENT, `Invalid query. When querying with documentId(), you must provide a valid string or a DocumentReference, but it was: ${Wu(n)}.`);
 }
 
 /**
  * Validates that the value passed into a disjunctive filter satisfies all
  * array requirements.
- */ function zh(t, e) {
-    if (!Array.isArray(t) || 0 === t.length) throw new Q(G.INVALID_ARGUMENT, `Invalid Query. A non-empty array is required for '${e.toString()}' filters.`);
-    if (t.length > 10) throw new Q(G.INVALID_ARGUMENT, `Invalid Query. '${e.toString()}' filters support a maximum of 10 elements in the value array.`);
+ */ function Ch(t, e) {
+    if (!Array.isArray(t) || 0 === t.length) throw new j(G.INVALID_ARGUMENT, `Invalid Query. A non-empty array is required for '${e.toString()}' filters.`);
+    if (t.length > 10) throw new j(G.INVALID_ARGUMENT, `Invalid Query. '${e.toString()}' filters support a maximum of 10 elements in the value array.`);
 }
 
-function Hh(t, e, n) {
-    if (!n.isEqual(e)) throw new Q(G.INVALID_ARGUMENT, `Invalid query. You have a where filter with an inequality (<, <=, !=, not-in, >, or >=) on field '${e.toString()}' and so you must also use '${e.toString()}' as your first argument to orderBy(), but your first orderBy() is on field '${n.toString()}' instead.`);
+function Nh(t, e, n) {
+    if (!n.isEqual(e)) throw new j(G.INVALID_ARGUMENT, `Invalid query. You have a where filter with an inequality (<, <=, !=, not-in, >, or >=) on field '${e.toString()}' and so you must also use '${e.toString()}' as your first argument to orderBy(), but your first orderBy() is on field '${n.toString()}' instead.`);
 }
 
 /**
@@ -21711,9 +21306,9 @@ function Hh(t, e, n) {
  * to the user.
  *
  * @internal
- */ class Jh {
+ */ class xh {
     convertValue(t, e = "none") {
-        switch (Mt(t)) {
+        switch (kt(t)) {
           case 0 /* NullValue */ :
             return null;
 
@@ -21721,7 +21316,7 @@ function Hh(t, e, n) {
             return t.booleanValue;
 
           case 2 /* NumberValue */ :
-            return Et(t.integerValue || t.doubleValue);
+            return Tt(t.integerValue || t.doubleValue);
 
           case 3 /* TimestampValue */ :
             return this.convertTimestamp(t.timestampValue);
@@ -21758,7 +21353,7 @@ function Hh(t, e, n) {
         })), n;
     }
     convertGeoPoint(t) {
-        return new zc(Et(t.latitude), Et(t.longitude));
+        return new Ca(Tt(t.latitude), Tt(t.longitude));
     }
     convertArray(t, e) {
         return (t.values || []).map((t => this.convertValue(t, e)));
@@ -21777,16 +21372,16 @@ function Hh(t, e, n) {
         }
     }
     convertTimestamp(t) {
-        const e = Tt(t);
-        return new at(e.seconds, e.nanos);
+        const e = Et(t);
+        return new ut(e.seconds, e.nanos);
     }
     convertDocumentKey(t, e) {
         const n = _t.fromString(t);
-        U(Gs(n));
-        const s = new vt(n.get(1), n.get(3)), i = new xt(n.popFirst(5));
+        U(vs(n));
+        const s = new Vt(n.get(1), n.get(3)), i = new Nt(n.popFirst(5));
         return s.isEqual(e) || 
         // TODO(b/64130202): Somehow support foreign references.
-        F(`Document ${i} contains a document reference within a different database (${s.projectId}/${s.database}) which is not supported. It will be treated as a reference in the current database (${e.projectId}/${e.database}) instead.`), 
+        $(`Document ${i} contains a document reference within a different database (${s.projectId}/${s.database}) which is not supported. It will be treated as a reference in the current database (${e.projectId}/${e.database}) instead.`), 
         i;
     }
 }
@@ -21815,7 +21410,7 @@ function Hh(t, e, n) {
  * because we want to provide the user with a more specific error message if
  * their `set()` or fails due to invalid data originating from a `toFirestore()`
  * call.
- */ function Yh(t, e, n) {
+ */ function kh(t, e, n) {
     let s;
     // Cast to `any` in order to satisfy the union type constraint on
     // toFirestore().
@@ -21824,16 +21419,16 @@ function Hh(t, e, n) {
     s;
 }
 
-class Xh extends Jh {
+class Oh extends xh {
     constructor(t) {
         super(), this.firestore = t;
     }
     convertBytes(t) {
-        return new jc(t);
+        return new Sa(t);
     }
     convertReference(t) {
         const e = this.convertDocumentKey(t, this.firestore._databaseId);
-        return new mc(this.firestore, /* converter= */ null, e);
+        return new Zu(this.firestore, /* converter= */ null, e);
     }
 }
 
@@ -21860,25 +21455,25 @@ class Xh extends Jh {
  * provides methods for adding writes to the write batch. None of the writes
  * will be committed (or visible locally) until {@link WriteBatch.commit} is
  * called.
- */ class Zh {
+ */ class Mh {
     /** @hideconstructor */
     constructor(t, e) {
         this._firestore = t, this._commitHandler = e, this._mutations = [], this._committed = !1, 
-        this._dataReader = eh(t);
+        this._dataReader = Fa(t);
     }
     set(t, e, n) {
         this._verifyNotCommitted();
-        const s = tl(t, this._firestore), i = Yh(s.converter, e, n), r = nh(this._dataReader, "WriteBatch.set", s._key, i, null !== s.converter, n);
-        return this._mutations.push(r.toMutation(s._key, yn.none())), this;
+        const s = $h(t, this._firestore), i = kh(s.converter, e, n), r = Ba(this._dataReader, "WriteBatch.set", s._key, i, null !== s.converter, n);
+        return this._mutations.push(r.toMutation(s._key, nn.none())), this;
     }
     update(t, e, n, ...s) {
         this._verifyNotCommitted();
-        const i = tl(t, this._firestore);
+        const i = $h(t, this._firestore);
         // For Compat types, we have to "extract" the underlying types before
         // performing validation.
                 let r;
-        return r = "string" == typeof (e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof Gc ? hh(this._dataReader, "WriteBatch.update", i._key, e, n, s) : ch(this._dataReader, "WriteBatch.update", i._key, e), 
-        this._mutations.push(r.toMutation(i._key, yn.exists(!0))), this;
+        return r = "string" == typeof (e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof va ? Wa(this._dataReader, "WriteBatch.update", i._key, e, n, s) : Qa(this._dataReader, "WriteBatch.update", i._key, e), 
+        this._mutations.push(r.toMutation(i._key, nn.exists(!0))), this;
     }
     /**
      * Deletes the document referred to by the provided {@link DocumentReference}.
@@ -21887,8 +21482,8 @@ class Xh extends Jh {
      * @returns This `WriteBatch` instance. Used for chaining method calls.
      */    delete(t) {
         this._verifyNotCommitted();
-        const e = tl(t, this._firestore);
-        return this._mutations = this._mutations.concat(new Cn(e._key, yn.none())), this;
+        const e = $h(t, this._firestore);
+        return this._mutations = this._mutations.concat(new mn(e._key, nn.none())), this;
     }
     /**
      * Commits all of the writes in this write batch as a single atomic unit.
@@ -21905,12 +21500,12 @@ class Xh extends Jh {
         return this._verifyNotCommitted(), this._committed = !0, this._mutations.length > 0 ? this._commitHandler(this._mutations) : Promise.resolve();
     }
     _verifyNotCommitted() {
-        if (this._committed) throw new Q(G.FAILED_PRECONDITION, "A write batch can no longer be used after commit() has been called.");
+        if (this._committed) throw new j(G.FAILED_PRECONDITION, "A write batch can no longer be used after commit() has been called.");
     }
 }
 
-function tl(t, e) {
-    if ((t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t)).firestore !== e) throw new Q(G.INVALID_ARGUMENT, "Provided document reference is from a different Firestore instance.");
+function $h(t, e) {
+    if ((t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t)).firestore !== e) throw new j(G.INVALID_ARGUMENT, "Provided document reference is from a different Firestore instance.");
     return t;
 }
 
@@ -21967,22 +21562,22 @@ function tl(t, e) {
  * @returns A Promise resolved with a `DocumentSnapshot` containing the
  * current document contents.
  */
-function el(t) {
-    t = lc(t, mc);
-    const e = lc(t.firestore, vc);
-    return Xa(Cc(e), t._key).then((n => wl(e, t, n)));
+function Fh(t) {
+    t = zu(t, Zu);
+    const e = zu(t.firestore, la);
+    return Ou(_a(e), t._key).then((n => Xh(e, t, n)));
 }
 
-class nl extends Jh {
+class Bh extends xh {
     constructor(t) {
         super(), this.firestore = t;
     }
     convertBytes(t) {
-        return new jc(t);
+        return new Sa(t);
     }
     convertReference(t) {
         const e = this.convertDocumentKey(t, this.firestore._databaseId);
-        return new mc(this.firestore, /* converter= */ null, e);
+        return new Zu(this.firestore, /* converter= */ null, e);
     }
 }
 
@@ -21992,10 +21587,10 @@ class nl extends Jh {
  *
  * @returns A `Promise` resolved with a `DocumentSnapshot` containing the
  * current document contents.
- */ function sl(t) {
-    t = lc(t, mc);
-    const e = lc(t.firestore, vc), n = Cc(e), s = new nl(e);
-    return Ya(n, t._key).then((n => new Ph(e, s, t._key, n, new Rh(null !== n && n.hasLocalMutations, 
+ */ function Lh(t) {
+    t = zu(t, Zu);
+    const e = zu(t.firestore, la), n = _a(e), s = new Bh(e);
+    return ku(n, t._key).then((n => new uh(e, s, t._key, n, new ch(null !== n && n.hasLocalMutations, 
     /* fromCache= */ !0), t.converter)));
 }
 
@@ -22005,12 +21600,12 @@ class nl extends Jh {
  *
  * @returns A `Promise` resolved with a `DocumentSnapshot` containing the
  * current document contents.
- */ function il(t) {
-    t = lc(t, mc);
-    const e = lc(t.firestore, vc);
-    return Xa(Cc(e), t._key, {
+ */ function Uh(t) {
+    t = zu(t, Zu);
+    const e = zu(t.firestore, la);
+    return Ou(_a(e), t._key, {
         source: "server"
-    }).then((n => wl(e, t, n)));
+    }).then((n => Xh(e, t, n)));
 }
 
 /**
@@ -22022,10 +21617,10 @@ class nl extends Jh {
  * invoke {@link getDocsFromCache} or {@link getDocsFromServer}.
  *
  * @returns A `Promise` that will be resolved with the results of the query.
- */ function rl(t) {
-    t = lc(t, gc);
-    const e = lc(t.firestore, vc), n = Cc(e), s = new nl(e);
-    return Dh(t._query), tc(n, t._query).then((n => new Vh(e, s, t, n)));
+ */ function qh(t) {
+    t = zu(t, ta);
+    const e = zu(t.firestore, la), n = _a(e), s = new Bh(e);
+    return dh(t._query), $u(n, t._query).then((n => new hh(e, s, t, n)));
 }
 
 /**
@@ -22033,10 +21628,10 @@ class nl extends Jh {
  * Returns an error if the document is not currently cached.
  *
  * @returns A `Promise` that will be resolved with the results of the query.
- */ function ol(t) {
-    t = lc(t, gc);
-    const e = lc(t.firestore, vc), n = Cc(e), s = new nl(e);
-    return Za(n, t._query).then((n => new Vh(e, s, t, n)));
+ */ function Kh(t) {
+    t = zu(t, ta);
+    const e = zu(t.firestore, la), n = _a(e), s = new Bh(e);
+    return Mu(n, t._query).then((n => new hh(e, s, t, n)));
 }
 
 /**
@@ -22044,29 +21639,29 @@ class nl extends Jh {
  * server. Returns an error if the network is not available.
  *
  * @returns A `Promise` that will be resolved with the results of the query.
- */ function ul(t) {
-    t = lc(t, gc);
-    const e = lc(t.firestore, vc), n = Cc(e), s = new nl(e);
-    return tc(n, t._query, {
+ */ function Gh(t) {
+    t = zu(t, ta);
+    const e = zu(t.firestore, la), n = _a(e), s = new Bh(e);
+    return $u(n, t._query, {
         source: "server"
-    }).then((n => new Vh(e, s, t, n)));
+    }).then((n => new hh(e, s, t, n)));
 }
 
-function al(t, e, n) {
-    t = lc(t, mc);
-    const s = lc(t.firestore, vc), i = Yh(t.converter, e, n);
-    return _l(s, [ nh(eh(s), "setDoc", t._key, i, null !== t.converter, n).toMutation(t._key, yn.none()) ]);
+function jh(t, e, n) {
+    t = zu(t, Zu);
+    const s = zu(t.firestore, la), i = kh(t.converter, e, n);
+    return Yh(s, [ Ba(Fa(s), "setDoc", t._key, i, null !== t.converter, n).toMutation(t._key, nn.none()) ]);
 }
 
-function cl(t, e, n, ...s) {
-    t = lc(t, mc);
-    const i = lc(t.firestore, vc), r = eh(i);
+function Qh(t, e, n, ...s) {
+    t = zu(t, Zu);
+    const i = zu(t.firestore, la), r = Fa(i);
     let o;
     o = "string" == typeof (
     // For Compat types, we have to "extract" the underlying types before
     // performing validation.
-    e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof Gc ? hh(r, "updateDoc", t._key, e, n, s) : ch(r, "updateDoc", t._key, e);
-    return _l(i, [ o.toMutation(t._key, yn.exists(!0)) ]);
+    e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof va ? Wa(r, "updateDoc", t._key, e, n, s) : Qa(r, "updateDoc", t._key, e);
+    return Yh(i, [ o.toMutation(t._key, nn.exists(!0)) ]);
 }
 
 /**
@@ -22075,8 +21670,8 @@ function cl(t, e, n, ...s) {
  * @param reference - A reference to the document to delete.
  * @returns A Promise resolved once the document has been successfully
  * deleted from the backend (note that it won't resolve while you're offline).
- */ function hl(t) {
-    return _l(lc(t.firestore, vc), [ new Cn(t._key, yn.none()) ]);
+ */ function Wh(t) {
+    return Yh(zu(t.firestore, la), [ new mn(t._key, nn.none()) ]);
 }
 
 /**
@@ -22088,55 +21683,55 @@ function cl(t, e, n, ...s) {
  * @returns A `Promise` resolved with a `DocumentReference` pointing to the
  * newly created document after it has been written to the backend (Note that it
  * won't resolve while you're offline).
- */ function ll(t, e) {
-    const n = lc(t.firestore, vc), s = Tc(t), i = Yh(t.converter, e);
-    return _l(n, [ nh(eh(t.firestore), "addDoc", s._key, i, null !== t.converter, {}).toMutation(s._key, yn.exists(!1)) ]).then((() => s));
+ */ function zh(t, e) {
+    const n = zu(t.firestore, la), s = ia(t), i = kh(t.converter, e);
+    return Yh(n, [ Ba(Fa(t.firestore), "addDoc", s._key, i, null !== t.converter, {}).toMutation(s._key, nn.exists(!1)) ]).then((() => s));
 }
 
-function fl(t, ...e) {
+function Hh(t, ...e) {
     var n, s, i;
     t = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(t);
     let r = {
         includeMetadataChanges: !1
     }, o = 0;
-    "object" != typeof e[o] || Pc(e[o]) || (r = e[o], o++);
-    const u = {
+    "object" != typeof e[o] || ua(e[o]) || (r = e[o], o++);
+    const c = {
         includeMetadataChanges: r.includeMetadataChanges
     };
-    if (Pc(e[o])) {
+    if (ua(e[o])) {
         const t = e[o];
         e[o] = null === (n = t.next) || void 0 === n ? void 0 : n.bind(t), e[o + 1] = null === (s = t.error) || void 0 === s ? void 0 : s.bind(t), 
         e[o + 2] = null === (i = t.complete) || void 0 === i ? void 0 : i.bind(t);
     }
-    let a, c, h;
-    if (t instanceof mc) c = lc(t.firestore, vc), h = Fe(t._key.path), a = {
+    let u, a, h;
+    if (t instanceof Zu) a = zu(t.firestore, la), h = Ae(t._key.path), u = {
         next: n => {
-            e[o] && e[o](wl(c, t, n));
+            e[o] && e[o](Xh(a, t, n));
         },
         error: e[o + 1],
         complete: e[o + 2]
     }; else {
-        const n = lc(t, gc);
-        c = lc(n.firestore, vc), h = n._query;
-        const s = new nl(c);
-        a = {
+        const n = zu(t, ta);
+        a = zu(n.firestore, la), h = n._query;
+        const s = new Bh(a);
+        u = {
             next: t => {
-                e[o] && e[o](new Vh(c, s, n, t));
+                e[o] && e[o](new hh(a, s, n, t));
             },
             error: e[o + 1],
             complete: e[o + 2]
-        }, Dh(t._query);
+        }, dh(t._query);
     }
     return function(t, e, n, s) {
-        const i = new Ma(s), r = new Uu(e, i, n);
-        return t.asyncQueue.enqueueAndForget((async () => Ou(await za(t), r))), () => {
-            i.Ia(), t.asyncQueue.enqueueAndForget((async () => Fu(await za(t), r)));
+        const i = new yu(s), r = new Rc(e, i, n);
+        return t.asyncQueue.enqueueAndForget((async () => pc(await Cu(t), r))), () => {
+            i.Jc(), t.asyncQueue.enqueueAndForget((async () => Ic(await Cu(t), r)));
         };
-    }(Cc(c), h, u, a);
+    }(_a(a), h, c, u);
 }
 
-function dl(t, e) {
-    return ec(Cc(t = lc(t, vc)), Pc(e) ? e : {
+function Jh(t, e) {
+    return Fu(_a(t = zu(t, la)), ua(e) ? e : {
         next: e
     });
 }
@@ -22144,19 +21739,19 @@ function dl(t, e) {
 /**
  * Locally writes `mutations` on the async queue.
  * @internal
- */ function _l(t, e) {
+ */ function Yh(t, e) {
     return function(t, e) {
-        const n = new j;
-        return t.asyncQueue.enqueueAndForget((async () => ea(await Wa(t), e, n))), n.promise;
-    }(Cc(t), e);
+        const n = new Q;
+        return t.asyncQueue.enqueueAndForget((async () => Fc(await Du(t), e, n))), n.promise;
+    }(_a(t), e);
 }
 
 /**
  * Converts a {@link ViewSnapshot} that contains the single document specified by `ref`
  * to a {@link DocumentSnapshot}.
- */ function wl(t, e, n) {
-    const s = n.docs.get(e._key), i = new nl(t);
-    return new Ph(t, i, e._key, s, new Rh(n.hasPendingWrites, n.fromCache), e.converter);
+ */ function Xh(t, e, n) {
+    const s = n.docs.get(e._key), i = new Bh(t);
+    return new uh(t, i, e._key, s, new ch(n.hasPendingWrites, n.fromCache), e.converter);
 }
 
 /**
@@ -22181,10 +21776,10 @@ function dl(t, e) {
  * The `Transaction` object passed to a transaction's `updateFunction` provides
  * the methods to read and write data within the transaction context. See
  * {@link runTransaction}.
- */ class ml extends class {
+ */ class Zh extends class {
     /** @hideconstructor */
     constructor(t, e) {
-        this._firestore = t, this._transaction = e, this._dataReader = eh(t);
+        this._firestore = t, this._transaction = e, this._dataReader = Fa(t);
     }
     /**
      * Reads the document referenced by the provided {@link DocumentReference}.
@@ -22192,25 +21787,25 @@ function dl(t, e) {
      * @param documentRef - A reference to the document to be read.
      * @returns A `DocumentSnapshot` with the read data.
      */    get(t) {
-        const e = tl(t, this._firestore), n = new Xh(this._firestore);
+        const e = $h(t, this._firestore), n = new Oh(this._firestore);
         return this._transaction.lookup([ e._key ]).then((t => {
             if (!t || 1 !== t.length) return L();
             const s = t[0];
-            if (s.isFoundDocument()) return new Th(this._firestore, n, s.key, s, e.converter);
-            if (s.isNoDocument()) return new Th(this._firestore, n, e._key, null, e.converter);
+            if (s.isFoundDocument()) return new ih(this._firestore, n, s.key, s, e.converter);
+            if (s.isNoDocument()) return new ih(this._firestore, n, e._key, null, e.converter);
             throw L();
         }));
     }
     set(t, e, n) {
-        const s = tl(t, this._firestore), i = Yh(s.converter, e, n), r = nh(this._dataReader, "Transaction.set", s._key, i, null !== s.converter, n);
+        const s = $h(t, this._firestore), i = kh(s.converter, e, n), r = Ba(this._dataReader, "Transaction.set", s._key, i, null !== s.converter, n);
         return this._transaction.set(s._key, r), this;
     }
     update(t, e, n, ...s) {
-        const i = tl(t, this._firestore);
+        const i = $h(t, this._firestore);
         // For Compat types, we have to "extract" the underlying types before
         // performing validation.
                 let r;
-        return r = "string" == typeof (e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof Gc ? hh(this._dataReader, "Transaction.update", i._key, e, n, s) : ch(this._dataReader, "Transaction.update", i._key, e), 
+        return r = "string" == typeof (e = Object(_firebase_util__WEBPACK_IMPORTED_MODULE_3__["getModularInstance"])(e)) || e instanceof va ? Wa(this._dataReader, "Transaction.update", i._key, e, n, s) : Qa(this._dataReader, "Transaction.update", i._key, e), 
         this._transaction.update(i._key, r), this;
     }
     /**
@@ -22219,7 +21814,7 @@ function dl(t, e) {
      * @param documentRef - A reference to the document to be deleted.
      * @returns This `Transaction` instance. Used for chaining method calls.
      */    delete(t) {
-        const e = tl(t, this._firestore);
+        const e = $h(t, this._firestore);
         return this._transaction.delete(e._key), this;
     }
 } {
@@ -22235,8 +21830,8 @@ function dl(t, e) {
      * @param documentRef - A reference to the document to be read.
      * @returns A `DocumentSnapshot` with the read data.
      */    get(t) {
-        const e = tl(t, this._firestore), n = new nl(this._firestore);
-        return super.get(t).then((t => new Ph(this._firestore, n, e._key, t._document, new Rh(
+        const e = $h(t, this._firestore), n = new Bh(this._firestore);
+        return super.get(t).then((t => new uh(this._firestore, n, e._key, t._document, new ch(
         /* hasPendingWrites= */ !1, 
         /* fromCache= */ !1), e.converter)));
     }
@@ -22258,8 +21853,8 @@ function dl(t, e) {
  * (the `updateFunction` returned a failed promise), the promise returned by the
  * `updateFunction `is returned here. Otherwise, if the transaction failed, a
  * rejected promise with the corresponding failure error is returned.
- */ function gl(t, e) {
-    return nc(Cc(t = lc(t, vc)), (n => e(new ml(t, n))));
+ */ function tl(t, e) {
+    return Bu(_a(t = zu(t, la)), (n => e(new Zh(t, n))));
 }
 
 /**
@@ -22281,15 +21876,15 @@ function dl(t, e) {
 /**
  * Returns a sentinel for use with {@link @firebase/firestore/lite#(updateDoc:1)} or
  * {@link @firebase/firestore/lite#(setDoc:1)} with `{merge: true}` to mark a field for deletion.
- */ function yl() {
-    return new sh("deleteField");
+ */ function el() {
+    return new La("deleteField");
 }
 
 /**
  * Returns a sentinel used with {@link @firebase/firestore/lite#(setDoc:1)} or {@link @firebase/firestore/lite#(updateDoc:1)} to
  * include a server-generated timestamp in the written data.
- */ function pl() {
-    return new rh("serverTimestamp");
+ */ function nl() {
+    return new qa("serverTimestamp");
 }
 
 /**
@@ -22303,10 +21898,10 @@ function dl(t, e) {
  * @param elements - The elements to union into the array.
  * @returns The `FieldValue` sentinel for use in a call to `setDoc()` or
  * `updateDoc()`.
- */ function Il(...t) {
+ */ function sl(...t) {
     // NOTE: We don't actually parse the data until it's used in set() or
     // update() since we'd need the Firestore instance to do this.
-    return new oh("arrayUnion", t);
+    return new Ka("arrayUnion", t);
 }
 
 /**
@@ -22319,10 +21914,10 @@ function dl(t, e) {
  * @param elements - The elements to remove from the array.
  * @returns The `FieldValue` sentinel for use in a call to `setDoc()` or
  * `updateDoc()`
- */ function Tl(...t) {
+ */ function il(...t) {
     // NOTE: We don't actually parse the data until it's used in set() or
     // update() since we'd need the Firestore instance to do this.
-    return new uh("arrayRemove", t);
+    return new Ga("arrayRemove", t);
 }
 
 /**
@@ -22343,8 +21938,8 @@ function dl(t, e) {
  * @param n - The value to increment by.
  * @returns The `FieldValue` sentinel for use in a call to `setDoc()` or
  * `updateDoc()`
- */ function El(t) {
-    return new ah("increment", t);
+ */ function rl(t) {
+    return new ja("increment", t);
 }
 
 /**
@@ -22373,8 +21968,8 @@ function dl(t, e) {
  *
  * @returns A {@link WriteBatch} that can be used to atomically execute multiple
  * writes.
- */ function Al(t) {
-    return Cc(t = lc(t, vc)), new Zh(t, (e => _l(t, e)));
+ */ function ol(t) {
+    return _a(t = zu(t, la)), new Mh(t, (e => Yh(t, e)));
 }
 
 /**
@@ -22392,31 +21987,31 @@ function dl(t, e) {
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- */ function Rl(t, e) {
-    Cc(t = lc(t, vc));
+ */ function cl(t, e) {
+    _a(t = zu(t, la));
     const n = "string" == typeof e ? function(t) {
         try {
             return JSON.parse(t);
         } catch (t) {
-            throw new Q(G.INVALID_ARGUMENT, "Failed to parse JSON:" + t.message);
+            throw new j(G.INVALID_ARGUMENT, "Failed to parse JSON:" + t.message);
         }
     }(e) : e, s = [];
     // PORTING NOTE: We don't return an error if the user has not enabled
     // persistence since `enableIndexeddbPersistence()` can fail on the Web.
     if (Array.isArray(n.indexes)) for (const t of n.indexes) {
-        const e = Pl(t, "collectionGroup"), n = [];
+        const e = ul(t, "collectionGroup"), n = [];
         if (Array.isArray(t.fields)) for (const e of t.fields) {
-            const t = yh("setIndexConfiguration", Pl(e, "fieldPath"));
-            "CONTAINS" === e.arrayConfig ? n.push(new oe(t, 2 /* CONTAINS */)) : "ASCENDING" === e.order ? n.push(new oe(t, 0 /* ASCENDING */)) : "DESCENDING" === e.order && n.push(new oe(t, 1 /* DESCENDING */));
+            const t = eh("setIndexConfiguration", ul(e, "fieldPath"));
+            "CONTAINS" === e.arrayConfig ? n.push(new Xt(t, 2 /* CONTAINS */)) : "ASCENDING" === e.order ? n.push(new Xt(t, 0 /* ASCENDING */)) : "DESCENDING" === e.order && n.push(new Xt(t, 1 /* DESCENDING */));
         }
-        s.push(new se(se.UNKNOWN_ID, e, n, ue.empty()));
+        s.push(new Yt(Yt.UNKNOWN_ID, e, n, Zt.empty()));
     }
     // TODO(indexing): Configure indexes
         return Promise.resolve();
 }
 
-function Pl(t, e) {
-    if ("string" != typeof t[e]) throw new Q(G.INVALID_ARGUMENT, "Missing string value for: " + e);
+function ul(t, e) {
+    if ("string" != typeof t[e]) throw new j(G.INVALID_ARGUMENT, "Missing string value for: " + e);
     return t[e];
 }
 
@@ -22426,15 +22021,15 @@ function Pl(t, e) {
  * @packageDocumentation
  */ !function(t, e = !0) {
     !function(t) {
-        x = t;
+        N = t;
     }(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["SDK_VERSION"]), Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["_registerComponent"])(new _firebase_component__WEBPACK_IMPORTED_MODULE_1__["Component"]("firestore", ((t, {options: n}) => {
-        const s = t.getProvider("app").getImmediate(), i = new vc(s, new J(t.getProvider("auth-internal")), new tt(t.getProvider("app-check-internal")));
+        const s = t.getProvider("app").getImmediate(), i = new la(s, new J(t.getProvider("auth-internal")), new tt(t.getProvider("app-check-internal")));
         return n = Object.assign({
             useFetchStreams: e
         }, n), i._setSettings(n), i;
-    }), "PUBLIC")), Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["registerVersion"])(D, "3.4.8", t), 
+    }), "PUBLIC")), Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["registerVersion"])(D, "3.4.5", t), 
     // BUILD_TARGET will be replaced by values like esm5, esm2017, cjs5, etc during the compilation
-    Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["registerVersion"])(D, "3.4.8", "esm2017");
+    Object(_firebase_app__WEBPACK_IMPORTED_MODULE_0__["registerVersion"])(D, "3.4.5", "esm2017");
 }();
 
 
@@ -22684,13 +22279,12 @@ function setUserLogHandler(logCallback, options) {
 /*!***********************************************************!*\
   !*** ./node_modules/@firebase/util/dist/index.esm2017.js ***!
   \***********************************************************/
-/*! exports provided: CONSTANTS, DBWrapper, Deferred, ErrorFactory, FirebaseError, MAX_VALUE_MILLIS, RANDOM_FACTOR, Sha1, areCookiesEnabled, assert, assertionError, async, base64, base64Decode, base64Encode, base64urlEncodeWithoutPadding, calculateBackoffMillis, contains, createMockUserToken, createSubscribe, decode, deepCopy, deepEqual, deepExtend, deleteDB, errorPrefix, extractQuerystring, getGlobal, getModularInstance, getUA, isAdmin, isBrowser, isBrowserExtension, isElectron, isEmpty, isIE, isIndexedDBAvailable, isMobileCordova, isNode, isNodeSdk, isReactNative, isSafari, isUWP, isValidFormat, isValidTimestamp, issuedAtTime, jsonEval, map, openDB, ordinal, querystring, querystringDecode, safeGet, stringLength, stringToByteArray, stringify, validateArgCount, validateCallback, validateContextObject, validateIndexedDBOpenable, validateNamespace */
+/*! exports provided: CONSTANTS, Deferred, ErrorFactory, FirebaseError, MAX_VALUE_MILLIS, RANDOM_FACTOR, Sha1, areCookiesEnabled, assert, assertionError, async, base64, base64Decode, base64Encode, base64urlEncodeWithoutPadding, calculateBackoffMillis, contains, createMockUserToken, createSubscribe, decode, deepCopy, deepEqual, deepExtend, errorPrefix, extractQuerystring, getGlobal, getModularInstance, getUA, isAdmin, isBrowser, isBrowserExtension, isElectron, isEmpty, isIE, isIndexedDBAvailable, isMobileCordova, isNode, isNodeSdk, isReactNative, isSafari, isUWP, isValidFormat, isValidTimestamp, issuedAtTime, jsonEval, map, ordinal, querystring, querystringDecode, safeGet, stringLength, stringToByteArray, stringify, validateArgCount, validateCallback, validateContextObject, validateIndexedDBOpenable, validateNamespace */
 /***/ (function(module, __webpack_exports__, __webpack_require__) {
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CONSTANTS", function() { return CONSTANTS; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DBWrapper", function() { return DBWrapper; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "Deferred", function() { return Deferred; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ErrorFactory", function() { return ErrorFactory; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "FirebaseError", function() { return FirebaseError; });
@@ -22713,7 +22307,6 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deepCopy", function() { return deepCopy; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deepEqual", function() { return deepEqual; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deepExtend", function() { return deepExtend; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "deleteDB", function() { return deleteDB; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "errorPrefix", function() { return errorPrefix; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "extractQuerystring", function() { return extractQuerystring; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "getGlobal", function() { return getGlobal; });
@@ -22737,7 +22330,6 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "issuedAtTime", function() { return issuedAtTime; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "jsonEval", function() { return jsonEval; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "map", function() { return map; });
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "openDB", function() { return openDB; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "ordinal", function() { return ordinal; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "querystring", function() { return querystring; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "querystringDecode", function() { return querystringDecode; });
@@ -24647,162 +24239,6 @@ function getModularInstance(service) {
     }
 }
 
-/**
- * @license
- * Copyright 2022 Google LLC
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *   http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-/**
- * @internal
- */
-function promisifyRequest(request, errorMessage) {
-    return new Promise((resolve, reject) => {
-        request.onsuccess = event => {
-            resolve(event.target.result);
-        };
-        request.onerror = event => {
-            var _a;
-            reject(`${errorMessage}: ${(_a = event.target.error) === null || _a === void 0 ? void 0 : _a.message}`);
-        };
-    });
-}
-/**
- * @internal
- */
-class DBWrapper {
-    constructor(_db) {
-        this._db = _db;
-        this.objectStoreNames = this._db.objectStoreNames;
-    }
-    transaction(storeNames, mode = 'readonly') {
-        return new TransactionWrapper(this._db.transaction.call(this._db, storeNames, mode));
-    }
-    createObjectStore(storeName, options) {
-        return new ObjectStoreWrapper(this._db.createObjectStore(storeName, options));
-    }
-    close() {
-        this._db.close();
-    }
-}
-/**
- * @internal
- */
-class TransactionWrapper {
-    constructor(_transaction) {
-        this._transaction = _transaction;
-        this.complete = new Promise((resolve, reject) => {
-            this._transaction.oncomplete = function () {
-                resolve();
-            };
-            this._transaction.onerror = () => {
-                reject(this._transaction.error);
-            };
-            this._transaction.onabort = () => {
-                reject(this._transaction.error);
-            };
-        });
-    }
-    objectStore(storeName) {
-        return new ObjectStoreWrapper(this._transaction.objectStore(storeName));
-    }
-}
-/**
- * @internal
- */
-class ObjectStoreWrapper {
-    constructor(_store) {
-        this._store = _store;
-    }
-    index(name) {
-        return new IndexWrapper(this._store.index(name));
-    }
-    createIndex(name, keypath, options) {
-        return new IndexWrapper(this._store.createIndex(name, keypath, options));
-    }
-    get(key) {
-        const request = this._store.get(key);
-        return promisifyRequest(request, 'Error reading from IndexedDB');
-    }
-    put(value, key) {
-        const request = this._store.put(value, key);
-        return promisifyRequest(request, 'Error writing to IndexedDB');
-    }
-    delete(key) {
-        const request = this._store.delete(key);
-        return promisifyRequest(request, 'Error deleting from IndexedDB');
-    }
-    clear() {
-        const request = this._store.clear();
-        return promisifyRequest(request, 'Error clearing IndexedDB object store');
-    }
-}
-/**
- * @internal
- */
-class IndexWrapper {
-    constructor(_index) {
-        this._index = _index;
-    }
-    get(key) {
-        const request = this._index.get(key);
-        return promisifyRequest(request, 'Error reading from IndexedDB');
-    }
-}
-/**
- * @internal
- */
-function openDB(dbName, dbVersion, upgradeCallback) {
-    return new Promise((resolve, reject) => {
-        try {
-            const request = indexedDB.open(dbName, dbVersion);
-            request.onsuccess = event => {
-                resolve(new DBWrapper(event.target.result));
-            };
-            request.onerror = event => {
-                var _a;
-                reject(`Error opening indexedDB: ${(_a = event.target.error) === null || _a === void 0 ? void 0 : _a.message}`);
-            };
-            request.onupgradeneeded = event => {
-                upgradeCallback(new DBWrapper(request.result), event.oldVersion, event.newVersion, new TransactionWrapper(request.transaction));
-            };
-        }
-        catch (e) {
-            reject(`Error opening indexedDB: ${e.message}`);
-        }
-    });
-}
-/**
- * @internal
- */
-async function deleteDB(dbName) {
-    return new Promise((resolve, reject) => {
-        try {
-            const request = indexedDB.deleteDatabase(dbName);
-            request.onsuccess = () => {
-                resolve();
-            };
-            request.onerror = event => {
-                var _a;
-                reject(`Error deleting indexedDB database "${dbName}": ${(_a = event.target.error) === null || _a === void 0 ? void 0 : _a.message}`);
-            };
-        }
-        catch (e) {
-            reject(`Error deleting indexedDB database "${dbName}": ${e.message}`);
-        }
-    });
-}
-
 
 //# sourceMappingURL=index.esm2017.js.map
 
@@ -25165,7 +24601,7 @@ __webpack_require__.r(__webpack_exports__);
 
 
 var name = "firebase";
-var version = "9.7.0";
+var version = "9.6.7";
 
 /**
  * @license
