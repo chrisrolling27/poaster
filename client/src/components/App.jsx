@@ -14,7 +14,7 @@ const FormContainer = styled.div`
   paddings: 8px; 
 `;
 const AddColumnButton = styled.button`
-color: tomato;
+  color: tomato;
   border-color: tomato;
   display: inline-block;
   color: palevioletred;

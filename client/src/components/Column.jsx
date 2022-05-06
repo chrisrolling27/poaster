@@ -17,6 +17,7 @@ const Container = styled.div`
 const Title = styled.h3`
   paddings: 8px;
   border: 1px;
+  font-size: 1em;
   background-color: moccasin;
   text-align: center;
 `;
@@ -24,13 +25,16 @@ const SessionList = styled.div`
   paddings: 8px;
   min-height: 100px;
   flex-grow: 1;
+  font-size: 1em;
   background-color: ${props => (props.isDraggingOver ? 'SkyBlue' : 'lightskyblue')};
 `;
 
 const TextBox = styled.input`
+  font-size: 1em;
   margin-left: 5px;
   margin-bottom: 5px;in
   background-color: white;
+  
 `;
 
 const AddCardButton = styled.button`
@@ -38,6 +42,7 @@ const AddCardButton = styled.button`
 background-color: lightskyblue;
 border: light;
 text-align: left;
+font-size: 1em;
 border: 1px solid lightskyblue;
 
 `;

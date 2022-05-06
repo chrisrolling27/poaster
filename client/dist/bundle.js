@@ -151,7 +151,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
 var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px; \n"])));
-var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ncolor: tomato;\n  border-color: tomato;\n  display: inline-block;\n  color: palevioletred;\n  font-size: 1em;\n  margin: 1em;\n  padding: 0.25em 1em;\n  border: 2px solid palevioletred;\n  border-radius: 3px;\n  display: block;\n"])));
+var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  color: tomato;\n  border-color: tomato;\n  display: inline-block;\n  color: palevioletred;\n  font-size: 1em;\n  margin: 1em;\n  padding: 0.25em 1em;\n  border: 2px solid palevioletred;\n  border-radius: 3px;\n  display: block;\n"])));
 var orig = {
   sessions: {},
   columns: {},
@@ -467,12 +467,12 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 500px;\n  height: 700px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
-var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  background-color: moccasin;\n  text-align: center;\n"])));
-var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  background-color: ", ";\n"])), function (props) {
+var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  font-size: 1em;\n  background-color: moccasin;\n  text-align: center;\n"])));
+var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  font-size: 1em;\n  background-color: ", ";\n"])), function (props) {
   return props.isDraggingOver ? 'SkyBlue' : 'lightskyblue';
 });
-var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin-left: 5px;\n  margin-bottom: 5px;in\n  background-color: white;\n"])));
-var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject5 || (_templateObject5 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: lightskyblue;\nborder: light;\ntext-align: left;\nborder: 1px solid lightskyblue;\n\n"])));
+var TextBox = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].input(_templateObject4 || (_templateObject4 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  font-size: 1em;\n  margin-left: 5px;\n  margin-bottom: 5px;in\n  background-color: white;\n  \n"])));
+var AddCardButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject5 || (_templateObject5 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: lightskyblue;\nborder: light;\ntext-align: left;\nfont-size: 1em;\nborder: 1px solid lightskyblue;\n\n"])));
 var SubmitButton = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].button(_templateObject6 || (_templateObject6 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n\nbackground-color: red;\nborder: light;\ntext-align: left;\nborder: 1px solid lightskyblue;\n\n"])));
 
 var Column = /*#__PURE__*/function (_React$Component) {
@@ -600,7 +600,7 @@ var _templateObject;
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: center;\n  padding: 50px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  height: 30px;\n  background-color: ", ";\n"])), function (props) {
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: center;\n  \n  padding: 50px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  height: 30px;\n  background-color: ", ";\n"])), function (props) {
   return props.isDragging ? 'lightgreen' : 'white';
 });
 
