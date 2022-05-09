@@ -4,12 +4,12 @@ import styled from 'styled-components';
 
 const Container = styled.div`
   margin: 8px;
-  text-align: center;
-  
+  text-align: left;
   padding: 50px 0;
   border: 1px solid lightgrey;
   border-radius: 2px;
   margin-bottom: 8px;
+  font-family: 'Roboto Flex', sans-serif;
   background-color: white;
   height: 30px;
   background-color: ${props => (props.isDragging ? 'lightgreen' : 'white')};

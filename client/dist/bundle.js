@@ -151,7 +151,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\ndisplay: flex;\n"])));
 var FormContainer = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].div(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  paddings: 8px; \n"])));
-var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  color: tomato;\n  border-color: tomato;\n  display: inline-block;\n  color: palevioletred;\n  font-size: 1em;\n  margin: 1em;\n  padding: 0.25em 1em;\n  border: 2px solid palevioletred;\n  border-radius: 3px;\n  display: block;\n"])));
+var AddColumnButton = styled_components__WEBPACK_IMPORTED_MODULE_10__["default"].button(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_8___default()(["\n  color: tomato;\n  font-family: 'Roboto Flex', sans-serif;\n  border-color: tomato;\n  display: inline-block;\n  color: palevioletred;\n  font-size: 1em;\n  margin: 1em;\n  padding: 0.25em 1em;\n  border: 2px solid palevioletred;\n  border-radius: 3px;\n  display: block;\n"])));
 var orig = {
   sessions: {},
   columns: {},
@@ -467,7 +467,7 @@ function _isNativeReflectConstruct() { if (typeof Reflect === "undefined" || !Re
 
 
 var Container = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  margin: 8px;\n  border: 1px;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  width: 500px;\n  height: 700px;\n  display: flex;\n  flex-direction: column;\n  background-color: lightskyblue;\n"])));
-var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  font-size: 1em;\n  background-color: moccasin;\n  text-align: center;\n"])));
+var Title = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].h3(_templateObject2 || (_templateObject2 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  border: 1px;\n  font-size: 1em;\n  background-color: moccasin;\n  text-align: center;\n  font-family: 'Roboto Flex', sans-serif;\n"])));
 var SessionList = styled_components__WEBPACK_IMPORTED_MODULE_9__["default"].div(_templateObject3 || (_templateObject3 = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_7___default()(["\n  paddings: 8px;\n  min-height: 100px;\n  flex-grow: 1;\n  font-size: 1em;\n  background-color: ", ";\n"])), function (props) {
   return props.isDraggingOver ? 'SkyBlue' : 'lightskyblue';
 });
@@ -600,7 +600,7 @@ var _templateObject;
 
 
 
-var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: center;\n  \n  padding: 50px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  background-color: white;\n  height: 30px;\n  background-color: ", ";\n"])), function (props) {
+var Container = styled_components__WEBPACK_IMPORTED_MODULE_4__["default"].div(_templateObject || (_templateObject = _babel_runtime_helpers_taggedTemplateLiteral__WEBPACK_IMPORTED_MODULE_1___default()(["\n  margin: 8px;\n  text-align: left;\n  padding: 50px 0;\n  border: 1px solid lightgrey;\n  border-radius: 2px;\n  margin-bottom: 8px;\n  font-family: 'Roboto Flex', sans-serif;\n  background-color: white;\n  height: 30px;\n  background-color: ", ";\n"])), function (props) {
   return props.isDragging ? 'lightgreen' : 'white';
 });
 

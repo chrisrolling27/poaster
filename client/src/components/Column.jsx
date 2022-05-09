@@ -20,6 +20,7 @@ const Title = styled.h3`
   font-size: 1em;
   background-color: moccasin;
   text-align: center;
+  font-family: 'Roboto Flex', sans-serif;
 `;
 const SessionList = styled.div`
   paddings: 8px;

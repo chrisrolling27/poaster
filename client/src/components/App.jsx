@@ -15,6 +15,7 @@ const FormContainer = styled.div`
 `;
 const AddColumnButton = styled.button`
   color: tomato;
+  font-family: 'Roboto Flex', sans-serif;
   border-color: tomato;
   display: inline-block;
   color: palevioletred;
