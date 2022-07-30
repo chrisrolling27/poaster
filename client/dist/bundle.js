@@ -119,7 +119,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var styled_components__WEBPACK_IMPORTED_MODULE_10__ = __webpack_require__(/*! styled-components */ "./node_modules/styled-components/dist/styled-components.browser.esm.js");
 /* harmony import */ var _Column_jsx__WEBPACK_IMPORTED_MODULE_11__ = __webpack_require__(/*! ./Column.jsx */ "./client/src/components/Column.jsx");
 /* harmony import */ var react_beautiful_dnd__WEBPACK_IMPORTED_MODULE_12__ = __webpack_require__(/*! react-beautiful-dnd */ "./node_modules/react-beautiful-dnd/dist/react-beautiful-dnd.esm.js");
-/* harmony import */ var _firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__ = __webpack_require__(/*! ../firebase/firebase_config.js */ "./client/src/firebase/firebase_config.js");
+!(function webpackMissingModule() { var e = new Error("Cannot find module '../firebase/firebase_config.js'"); e.code = 'MODULE_NOT_FOUND'; throw e; }());
 /* harmony import */ var firebase_app__WEBPACK_IMPORTED_MODULE_14__ = __webpack_require__(/*! firebase/app */ "./node_modules/firebase/app/dist/index.esm.js");
 /* harmony import */ var firebase_firestore__WEBPACK_IMPORTED_MODULE_15__ = __webpack_require__(/*! firebase/firestore */ "./node_modules/firebase/firestore/dist/index.esm.js");
 
@@ -409,7 +409,7 @@ var App = /*#__PURE__*/function (_React$Component) {
 
 
 
-var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(_firebase_firebase_config_js__WEBPACK_IMPORTED_MODULE_13__["firebaseConfig"]);
+var app = Object(firebase_app__WEBPACK_IMPORTED_MODULE_14__["initializeApp"])(!(function webpackMissingModule() { var e = new Error("Cannot find module '../firebase/firebase_config.js'"); e.code = 'MODULE_NOT_FOUND'; throw e; }()));
 var db = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["getFirestore"])(app); //test dummy user
 
 var userRef = Object(firebase_firestore__WEBPACK_IMPORTED_MODULE_15__["doc"])(db, "userDocs", "eiiXq5FO1dFPa0WJlff0");
@@ -617,34 +617,6 @@ var SessionCard = function SessionCard(props) {
 };
 
 /* harmony default export */ __webpack_exports__["default"] = (SessionCard);
-
-/***/ }),
-
-/***/ "./client/src/firebase/firebase_config.js":
-/*!************************************************!*\
-  !*** ./client/src/firebase/firebase_config.js ***!
-  \************************************************/
-/*! exports provided: firebaseConfig */
-/***/ (function(module, __webpack_exports__, __webpack_require__) {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "firebaseConfig", function() { return firebaseConfig; });
-// Import the functions you need from the SDKs you need
-// TODO: Add SDKs for Firebase products that you want to use
-// https://firebase.google.com/docs/web/setup#available-libraries
-// Your web app's Firebase configuration
-// For Firebase JS SDK v7.20.0 and later, measurementId is optional
-var firebaseConfig = {
-  apiKey: "AIzaSyBZOithYm4Rn9ZkT70NQGGDzIu1giqV7tc",
-  authDomain: "poaster-be8da.firebaseapp.com",
-  projectId: "poaster-be8da",
-  storageBucket: "poaster-be8da.appspot.com",
-  messagingSenderId: "490877761414",
-  appId: "1:490877761414:web:605e79a378fa20a7919e07",
-  measurementId: "G-LH2GEEBF7Z"
-};
-
 
 /***/ }),
 
