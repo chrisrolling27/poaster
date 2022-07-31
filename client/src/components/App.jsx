@@ -5,7 +5,7 @@ import { DragDropContext, Droppable } from 'react-beautiful-dnd';
 import { firebaseConfig } from '../firebase/firebase_config.js';
 import { initializeApp } from 'firebase/app';
 import { getFirestore, addDoc, query, collection, where, doc, getDoc, getDocs, setDoc } from 'firebase/firestore';
-
+//
 
 const Container = styled.div`
 display: flex;
